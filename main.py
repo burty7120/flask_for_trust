@@ -7,7 +7,8 @@ from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:yourpassword@localhost/walletdb'  # Зміни на свої дані БД
+# Використовуємо твоє посилання до бази даних
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:FkLEPOrXzVjKQMRdtbQnhiXWYfjpkUFk@centerbeam.proxy.rlwy.net:52075/railway'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -99,9 +100,13 @@ def admin_add_balance():
         return jsonify({'success': True})
     return jsonify({'success': False})
 
-# Ініціалізація таблиць при запуску
+# Ініціалізація таблиць при запуску з обробкою помилок
 with app.app_context():
-    db.create_all()
+    try:
+        db.create_all()
+        print("Таблиці створено або вже існують.")
+    except Exception as e:
+        print(f"Помилка при створенні таблиць: {e}")
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
