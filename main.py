@@ -3,11 +3,11 @@ from flask_sqlalchemy import SQLAlchemy
 import random
 import string
 from datetime import datetime
-from flask_cors import CORS  # Якщо frontend на іншому порту
+from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)  # Для крос-домен запиту, якщо треба
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:RdClXrkHJgoLvAzZhWxcAibavUTDlgLW@centerbeam.proxy.rlwy.net:47751/railway'  # Зміни на свої дані БД
+CORS(app)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:yourpassword@localhost/walletdb'  # Зміни на свої дані БД
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -16,14 +16,14 @@ words = [
     'apple', 'ball', 'cat', 'dog', 'egg', 'fish', 'goat', 'hat', 'ice', 'jam', 'kit', 'log',
     'man', 'net', 'oak', 'pig', 'quilt', 'rat', 'sun', 'top', 'up', 'van', 'win', 'xray',
     'yak', 'zip', 'ant', 'bee', 'cow', 'duck', 'ear', 'fox', 'gun', 'hen', 'ink', 'jug'
-]  # Додай більше, якщо треба
+]
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     seed_phrase = db.Column(db.Text, unique=True, nullable=False)
     pin = db.Column(db.String(6), nullable=False)
     balances = db.Column(db.JSON, default=lambda: {
-        'BTC': 0, 'ETH': 0, 'XLM': 0, 'UNI': 0, 'KOGE': 0, 'BR': 0  # Додай активи з скрінів
+        'BTC': 0, 'ETH': 0, 'XLM': 0, 'UNI': 0, 'KOGE': 0, 'BR': 0
     })
 
 class Log(db.Model):
@@ -99,7 +99,9 @@ def admin_add_balance():
         return jsonify({'success': True})
     return jsonify({'success': False})
 
+# Ініціалізація таблиць при запуску
+with app.app_context():
+    db.create_all()
+
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()  # Створи таблиці
     app.run(debug=True, port=5000)
