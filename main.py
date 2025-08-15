@@ -7,7 +7,7 @@ from flask_cors import CORS  # Якщо frontend на іншому порту
 
 app = Flask(__name__)
 CORS(app)  # Для крос-домен запиту, якщо треба
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:yourpassword@localhost/walletdb'  # Зміни на свої дані БД
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:RdClXrkHJgoLvAzZhWxcAibavUTDlgLW@centerbeam.proxy.rlwy.net:47751/railway'  # Зміни на свої дані БД
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
