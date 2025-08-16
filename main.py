@@ -7,11 +7,19 @@ from flask_cors import CORS
 from pycoingecko import CoinGeckoAPI
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)  # Дозволяємо всі походження
+CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:FkLEPOrXzVjKQMRdtbQnhiXWYfjpkUFk@centerbeam.proxy.rlwy.net:52075/railway'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 cg = CoinGeckoAPI()
+
+# Додаємо ручну обробку CORS
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST')
+    return response
 
 # Список коротких англійських слів для seed
 words = [
