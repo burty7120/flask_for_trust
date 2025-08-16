@@ -4,13 +4,14 @@ import random
 import string
 from datetime import datetime
 from flask_cors import CORS
+from pycoingecko import CoinGeckoAPI
 
 app = Flask(__name__)
 CORS(app)
-# Використовуємо твоє посилання до бази даних
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:FkLEPOrXzVjKQMRdtbQnhiXWYfjpkUFk@centerbeam.proxy.rlwy.net:52075/railway'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
+cg = CoinGeckoAPI()
 
 # Список коротких англійських слів для seed
 words = [
@@ -21,7 +22,7 @@ words = [
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    wallet_name = db.Column(db.String(50), default='Main wallet')  # Додано назву гаманця
+    wallet_name = db.Column(db.String(50), default='Main wallet')
     seed_phrase = db.Column(db.Text, unique=True, nullable=False)
     pin = db.Column(db.String(6), nullable=False)
     balances = db.Column(db.JSON, default=lambda: {
@@ -63,7 +64,7 @@ def login():
     wallet_name = data.get('wallet_name', 'Main wallet')
     user = User.query.filter_by(seed_phrase=seed).first()
     if user and user.pin == pin:
-        user.wallet_name = wallet_name  # Оновити назву гаманця, якщо задано
+        user.wallet_name = wallet_name
         db.session.commit()
         log_action(user.id, 'Logged in')
         return jsonify({'success': True, 'id': user.id, 'balances': user.balances, 'wallet_name': user.wallet_name})
@@ -75,7 +76,8 @@ def get_balances():
     user = User.query.get(user_id)
     if user:
         log_action(user.id, 'Viewed balances')
-        return jsonify({'success': True, 'balances': user.balances})
+        prices = cg.get_price(ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'br'], vs_currencies='usd', include_24hr_change='true')
+        return jsonify({'success': True, 'balances': user.balances, 'prices': prices})
     return jsonify({'success': False})
 
 @app.route('/admin/create_wallet', methods=['POST'])
@@ -104,7 +106,6 @@ def admin_add_balance():
         return jsonify({'success': True})
     return jsonify({'success': False})
 
-# Ініціалізація таблиць при запуску з обробкою помилок
 with app.app_context():
     try:
         db.create_all()
