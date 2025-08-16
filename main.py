@@ -7,7 +7,7 @@ from flask_cors import CORS
 from pycoingecko import CoinGeckoAPI
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}})  # Дозволяємо всі походження для тестування
+CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)  # Дозволяємо всі походження
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:FkLEPOrXzVjKQMRdtbQnhiXWYfjpkUFk@centerbeam.proxy.rlwy.net:52075/railway'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
