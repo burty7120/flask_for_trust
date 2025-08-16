@@ -7,18 +7,19 @@ from flask_cors import CORS
 from pycoingecko import CoinGeckoAPI
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "http://127.0.0.1:5500"}}, supports_credentials=True)  # Дозволяємо лише локальний фронтенд
+CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)  # Дозволяємо всі походження
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:FkLEPOrXzVjKQMRdtbQnhiXWYfjpkUFk@centerbeam.proxy.rlwy.net:52075/railway'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 cg = CoinGeckoAPI()
 
-# Додаємо ручну обробку CORS для надійності
+# Додаємо ручну обробку CORS для максимальної гнучкості
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', 'http://127.0.0.1:5500')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', '*')
+    response.headers.add('Access-Control-Allow-Methods', '*')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
     return response
 
 # Список коротких англійських слів для seed
@@ -122,4 +123,4 @@ with app.app_context():
         print(f"Помилка при створенні таблиць: {e}")
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000)  # Локально, для Railway порт визначить автоматично
