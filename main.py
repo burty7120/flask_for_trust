@@ -21,6 +21,7 @@ words = [
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    wallet_name = db.Column(db.String(50), default='Main wallet')  # Додано назву гаманця
     seed_phrase = db.Column(db.Text, unique=True, nullable=False)
     pin = db.Column(db.String(6), nullable=False)
     balances = db.Column(db.JSON, default=lambda: {
@@ -52,17 +53,20 @@ def generate_wallet():
     db.session.add(user)
     db.session.commit()
     log_action(user.id, 'Wallet created')
-    return jsonify({'success': True, 'id': user.id, 'seed': seed, 'pin': pin})
+    return jsonify({'success': True, 'id': user.id, 'seed': seed, 'pin': pin, 'wallet_name': user.wallet_name})
 
 @app.route('/login', methods=['POST'])
 def login():
     data = request.json
     seed = data.get('seed')
     pin = data.get('pin')
+    wallet_name = data.get('wallet_name', 'Main wallet')
     user = User.query.filter_by(seed_phrase=seed).first()
     if user and user.pin == pin:
+        user.wallet_name = wallet_name  # Оновити назву гаманця, якщо задано
+        db.session.commit()
         log_action(user.id, 'Logged in')
-        return jsonify({'success': True, 'id': user.id, 'balances': user.balances})
+        return jsonify({'success': True, 'id': user.id, 'balances': user.balances, 'wallet_name': user.wallet_name})
     return jsonify({'success': False})
 
 @app.route('/get_balances', methods=['GET'])
@@ -82,7 +86,7 @@ def admin_create_wallet():
     db.session.add(user)
     db.session.commit()
     log_action(user.id, 'Admin created wallet')
-    return jsonify({'success': True, 'id': user.id, 'seed': seed, 'pin': pin})
+    return jsonify({'success': True, 'id': user.id, 'seed': seed, 'pin': pin, 'wallet_name': user.wallet_name})
 
 @app.route('/admin/add_balance', methods=['POST'])
 def admin_add_balance():
