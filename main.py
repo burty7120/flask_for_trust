@@ -7,18 +7,18 @@ from flask_cors import CORS
 from pycoingecko import CoinGeckoAPI
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)  # Дозволяємо всі походження для тестування
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:FkLEPOrXzVjKQMRdtbQnhiXWYfjpkUFk@centerbeam.proxy.rlwy.net:52075/railway'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 cg = CoinGeckoAPI()
 
-# Додаємо ручну обробку CORS
+# Додаємо ручну обробку CORS для надійності
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,POST')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
     return response
 
 # Список коротких англійських слів для seed
@@ -54,7 +54,7 @@ def log_action(user_id, action):
     db.session.add(log)
     db.session.commit()
 
-@app.route('/generate', methods=['POST'])
+@app.route('/generate', methods=['POST', 'OPTIONS'])
 def generate_wallet():
     seed = generate_seed()
     pin = generate_pin()
@@ -64,7 +64,7 @@ def generate_wallet():
     log_action(user.id, 'Wallet created')
     return jsonify({'success': True, 'id': user.id, 'seed': seed, 'pin': pin, 'wallet_name': user.wallet_name})
 
-@app.route('/login', methods=['POST'])
+@app.route('/login', methods=['POST', 'OPTIONS'])
 def login():
     data = request.json
     seed = data.get('seed')
@@ -78,7 +78,7 @@ def login():
         return jsonify({'success': True, 'id': user.id, 'balances': user.balances, 'wallet_name': user.wallet_name})
     return jsonify({'success': False})
 
-@app.route('/get_balances', methods=['GET'])
+@app.route('/get_balances', methods=['GET', 'OPTIONS'])
 def get_balances():
     user_id = request.args.get('user_id')
     user = User.query.get(user_id)
@@ -88,7 +88,7 @@ def get_balances():
         return jsonify({'success': True, 'balances': user.balances, 'prices': prices})
     return jsonify({'success': False})
 
-@app.route('/admin/create_wallet', methods=['POST'])
+@app.route('/admin/create_wallet', methods=['POST', 'OPTIONS'])
 def admin_create_wallet():
     seed = generate_seed()
     pin = generate_pin()
@@ -98,7 +98,7 @@ def admin_create_wallet():
     log_action(user.id, 'Admin created wallet')
     return jsonify({'success': True, 'id': user.id, 'seed': seed, 'pin': pin, 'wallet_name': user.wallet_name})
 
-@app.route('/admin/add_balance', methods=['POST'])
+@app.route('/admin/add_balance', methods=['POST', 'OPTIONS'])
 def admin_add_balance():
     data = request.json
     seed = data.get('seed')
@@ -122,4 +122,4 @@ with app.app_context():
         print(f"Помилка при створенні таблиць: {e}")
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000)  # Локально, для Railway порт визначить автоматично
