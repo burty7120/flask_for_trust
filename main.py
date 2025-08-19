@@ -1,62 +1,37 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
+from flask_cors import CORS
+from pycoingecko import CoinGeckoAPI
 import random
 import string
 from datetime import datetime
-from flask_cors import CORS
-from pycoingecko import CoinGeckoAPI
+import logging
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)  # Дозволяємо всі походження
+# Enable CORS for all routes and origins
+CORS(app, resources={r"/*": {"origins": "*", "supports_credentials": True}})
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:FkLEPOrXzVjKQMRdtbQnhiXWYfjpkUFk@centerbeam.proxy.rlwy.net:52075/railway'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 cg = CoinGeckoAPI()
 
-# Додаємо ручну обробку CORS для максимальної гнучкості
+# Enable CORS logging for debugging
+logging.getLogger('flask_cors').level = logging.DEBUG
+
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', '*')
-    response.headers.add('Access-Control-Allow-Methods', '*')
-    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
     return response
 
-# Список коротких англійських слів для seed
-words = [
-    'apple', 'ball', 'cat', 'dog', 'egg', 'fish', 'goat', 'hat', 'ice', 'jam', 'kit', 'log',
-    'man', 'net', 'oak', 'pig', 'quilt', 'rat', 'sun', 'top', 'up', 'van', 'win', 'xray',
-    'yak', 'zip', 'ant', 'bee', 'cow', 'duck', 'ear', 'fox', 'gun', 'hen', 'ink', 'jug'
-]
-
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    wallet_name = db.Column(db.String(50), default='Main wallet')
-    seed_phrase = db.Column(db.Text, unique=True, nullable=False)
-    pin = db.Column(db.String(6), nullable=False)
-    balances = db.Column(db.JSON, default=lambda: {
-        'BTC': 0, 'ETH': 0, 'XLM': 0, 'UNI': 0, 'KOGE': 0, 'BR': 0
-    })
-
-class Log(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, nullable=False)
-    action = db.Column(db.Text, nullable=False)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-
-def generate_seed():
-    return ' '.join(random.choice(words) for _ in range(12))
-
-def generate_pin():
-    return ''.join(random.choice(string.digits) for _ in range(6))
-
-def log_action(user_id, action):
-    log = Log(user_id=user_id, action=action)
-    db.session.add(log)
-    db.session.commit()
+# ... rest of your models and functions remain unchanged ...
 
 @app.route('/generate', methods=['POST', 'OPTIONS'])
 def generate_wallet():
+    if request.method == 'OPTIONS':
+        return '', 204
     seed = generate_seed()
     pin = generate_pin()
     user = User(seed_phrase=seed, pin=pin)
@@ -67,6 +42,8 @@ def generate_wallet():
 
 @app.route('/login', methods=['POST', 'OPTIONS'])
 def login():
+    if request.method == 'OPTIONS':
+        return '', 204
     data = request.json
     seed = data.get('seed')
     pin = data.get('pin')
@@ -81,6 +58,8 @@ def login():
 
 @app.route('/get_balances', methods=['GET', 'OPTIONS'])
 def get_balances():
+    if request.method == 'OPTIONS':
+        return '', 204
     user_id = request.args.get('user_id')
     user = User.query.get(user_id)
     if user:
@@ -91,6 +70,8 @@ def get_balances():
 
 @app.route('/admin/create_wallet', methods=['POST', 'OPTIONS'])
 def admin_create_wallet():
+    if request.method == 'OPTIONS':
+        return '', 204
     seed = generate_seed()
     pin = generate_pin()
     user = User(seed_phrase=seed, pin=pin)
@@ -101,6 +82,8 @@ def admin_create_wallet():
 
 @app.route('/admin/add_balance', methods=['POST', 'OPTIONS'])
 def admin_add_balance():
+    if request.method == 'OPTIONS':
+        return '', 204
     data = request.json
     seed = data.get('seed')
     asset = data.get('asset')
@@ -123,4 +106,5 @@ with app.app_context():
         print(f"Помилка при створенні таблиць: {e}")
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)  # Локально, для Railway порт визначить автоматично
+    port = int(os.getenv("PORT", 5000))
+    app.run(debug=False, host="0.0.0.0", port=port)
