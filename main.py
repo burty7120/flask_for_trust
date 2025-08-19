@@ -74,11 +74,17 @@ def generate_wallet():
         logging.debug("Обробка OPTIONS-запиту для /generate")
         return '', 204
     try:
+        logging.debug("Початок створення гаманця")
         seed = generate_seed()
+        logging.debug(f"Seed згенеровано: {seed}")
         pin = generate_pin()
+        logging.debug(f"PIN згенеровано: {pin}")
         user = User(seed_phrase=seed, pin=pin)
+        logging.debug("Користувача створено")
         db.session.add(user)
+        logging.debug("Користувача додано до сесії")
         db.session.commit()
+        logging.debug("Коміт виконано")
         log_action(user.id, 'Wallet created')
         logging.debug(f"Гаманець створено: id={user.id}, seed={seed}")
         return jsonify({'success': True, 'id': user.id, 'seed': seed, 'pin': pin, 'wallet_name': user.wallet_name})
