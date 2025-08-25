@@ -51,6 +51,8 @@ class Log(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, nullable=False)
     action = db.Column(db.Text, nullable=False)
+    asset = db.Column(db.String(10), nullable=True)  # Додано поле для активу
+    amount = db.Column(db.Float, nullable=True)      # Додано поле для суми
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
 # Генерація seed-фрази
@@ -62,8 +64,8 @@ def generate_pin():
     return ''.join(random.choice(string.digits) for _ in range(6))
 
 # Логування дій
-def log_action(user_id, action):
-    log = Log(user_id=user_id, action=action)
+def log_action(user_id, action, asset=None, amount=None):
+    log = Log(user_id=user_id, action=action, asset=asset, amount=amount)
     db.session.add(log)
     db.session.commit()
 
@@ -136,6 +138,29 @@ def get_balances():
         logging.error(f"Помилка в /get_balances: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
+# Отримання деталей монети
+@app.route('/get_coin_details', methods=['GET', 'OPTIONS'])
+def get_coin_details():
+    if request.method == 'OPTIONS':
+        logging.debug("Обробка OPTIONS-запиту для /get_coin_details")
+        return '', 204
+    try:
+        user_id = request.args.get('user_id')
+        coin_id = request.args.get('coin_id')
+        user = User.query.get(user_id)
+        if user:
+            balance = user.balances.get(coin_id.upper(), 0)
+            transactions = Log.query.filter_by(user_id=user_id, asset=coin_id.upper()).all()
+            transaction_data = [{'amount': tx.amount, 'asset': tx.asset} for tx in transactions if tx.amount is not None]
+            log_action(user.id, f'Viewed coin details for {coin_id}')
+            logging.debug(f"Деталі монети отримано: user_id={user_id}, coin_id={coin_id}")
+            return jsonify({'success': True, 'balance': balance, 'transactions': transaction_data})
+        logging.warning(f"Користувача не знайдено: user_id={user_id}")
+        return jsonify({'success': False, 'message': 'Користувача не знайдено'})
+    except Exception as e:
+        logging.error(f"Помилка в /get_coin_details: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 # Адмін: створення гаманця
 @app.route('/admin/create_wallet', methods=['POST', 'OPTIONS'])
 def admin_create_wallet():
@@ -172,7 +197,7 @@ def admin_add_balance():
                 user.balances[asset] = 0
             user.balances[asset] += amount
             db.session.commit()
-            log_action(user.id, f'Admin added {amount} to {asset}')
+            log_action(user.id, f'Admin added {amount} to {asset}', asset=asset, amount=amount)
             logging.debug(f"Баланс додано: user_id={user.id}, asset={asset}, amount={amount}")
             return jsonify({'success': True})
         logging.warning(f"Користувача не знайдено: seed={seed}")
