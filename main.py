@@ -116,7 +116,7 @@ def get_balances():
         return '', 204
     try:
         user_id = request.args.get('user_id')
-        user = db.session.get(User, user_id)  # Updated to Session.get()
+        user = db.session.get(User, user_id)
         if user:
             log_action(user.id, 'Viewed balances')
             prices = cg.get_price(ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'br'], vs_currencies='usd', include_24hr_change='true')
@@ -136,7 +136,7 @@ def get_coin_details():
     try:
         user_id = request.args.get('user_id')
         coin_id = request.args.get('coin_id')
-        user = db.session.get(User, user_id)  # Updated to Session.get()
+        user = db.session.get(User, user_id)
         if user:
             balance = user.balances.get(coin_id.upper(), 0)
             transactions = Log.query.filter_by(user_id=user_id, asset=coin_id.upper()).all()
@@ -197,13 +197,6 @@ def admin_add_balance():
 def handle_exception(e):
     logging.error(f"Загальна помилка: {str(e)}")
     return jsonify({'success': False, 'message': 'Внутрішня помилка сервера'}), 500
-
-with app.app_context():
-    try:
-        db.create_all()
-        logging.info("Таблиці створено або вже існують.")
-    except Exception as e:
-        logging.error(f"Помилка при створенні таблиць: {str(e)}")
 
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
