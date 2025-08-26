@@ -3,3 +3,4 @@ flask_sqlalchemy
 flask_cors
 psycopg2
 pycoingecko
+flask-migrate
