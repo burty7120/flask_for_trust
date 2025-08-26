@@ -116,7 +116,7 @@ def get_balances():
         return '', 204
     try:
         user_id = request.args.get('user_id')
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)  # Updated to Session.get()
         if user:
             log_action(user.id, 'Viewed balances')
             prices = cg.get_price(ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'br'], vs_currencies='usd', include_24hr_change='true')
@@ -136,7 +136,7 @@ def get_coin_details():
     try:
         user_id = request.args.get('user_id')
         coin_id = request.args.get('coin_id')
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)  # Updated to Session.get()
         if user:
             balance = user.balances.get(coin_id.upper(), 0)
             transactions = Log.query.filter_by(user_id=user_id, asset=coin_id.upper()).all()
