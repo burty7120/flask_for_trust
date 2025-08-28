@@ -8,6 +8,7 @@ import string
 from datetime import datetime
 import logging
 import os
+from sqlalchemy.sql import text
 
 app = Flask(__name__)
 
@@ -72,8 +73,9 @@ def generate_trc20_address():
     characters = string.ascii_letters + string.digits
     address = 'T' + ''.join(random.choice(characters) for _ in range(33))
     # Перевіряємо унікальність адреси
-    while User.query.filter_by(address=address).first():
-        address = 'T' + ''.join(random.choice(characters) for _ in range(33))
+    with app.app_context():
+        while User.query.filter_by(address=address).first():
+            address = 'T' + ''.join(random.choice(characters) for _ in range(33))
     return address
 
 def log_action(user_id, action, asset=None, amount=None):
@@ -97,7 +99,9 @@ def init_db():
             columns = [col['name'] for col in inspector.get_columns('user')]
             if 'address' not in columns:
                 logger.info("Adding 'address' column to 'user' table")
-                db.engine.execute('ALTER TABLE "user" ADD COLUMN address VARCHAR(34) UNIQUE')
+                with db.engine.connect() as connection:
+                    connection.execute(text('ALTER TABLE "user" ADD COLUMN address VARCHAR(34) UNIQUE'))
+                    connection.commit()
             
             # Перевіряємо користувачів без адрес і додаємо TRC-20 адреси
             users_without_address = User.query.filter((User.address == None) | (User.address == '')).all()
@@ -109,8 +113,9 @@ def init_db():
         logger.error(f"Error initializing database: {str(e)}")
         db.session.rollback()
 
-# Викликаємо ініціалізацію при запуску
-init_db()
+# Викликаємо ініціалізацію після створення app
+with app.app_context():
+    init_db()
 
 # CORS headers for all responses
 @app.after_request
