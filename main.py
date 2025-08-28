@@ -314,14 +314,18 @@ def send_transaction():
         recipient_address = data.get('recipient_address')
 
         if not all([user_id, coin_symbol, amount, recipient_address]):
+            logger.warning(f"Missing required fields: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
             return jsonify({'success': False, 'message': 'Missing required fields'}), 400
 
         try:
+            user_id = int(user_id)  # Переконаємося, що user_id — ціле число
             amount = float(amount)
             if amount <= 0 or not isinstance(amount, (int, float)) or str(amount) == 'nan':
+                logger.warning(f"Invalid amount: {amount}")
                 return jsonify({'success': False, 'message': 'Invalid amount'}), 400
         except (ValueError, TypeError):
-            return jsonify({'success': False, 'message': 'Invalid amount format'}), 400
+            logger.warning(f"Invalid format: user_id={user_id}, amount={amount}")
+            return jsonify({'success': False, 'message': 'Invalid user_id or amount format'}), 400
 
         sender = db.session.get(User, user_id)
         if not sender:
@@ -329,7 +333,7 @@ def send_transaction():
             return jsonify({'success': False, 'message': 'Sender not found'}), 404
 
         coin_symbol = coin_symbol.upper()
-        if coin_symbol not in sender.balances or sender.balances[coin_symbol] < amount:
+        if coin_symbol not in sender.balances or float(sender.balances.get(coin_symbol, 0)) < amount:
             logger.warning(f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, balance={sender.balances.get(coin_symbol, 0)}, amount={amount}")
             return jsonify({'success': False, 'message': 'Insufficient balance'}), 400
 
@@ -338,17 +342,19 @@ def send_transaction():
             logger.warning(f"Recipient not found: address={recipient_address}")
             return jsonify({'success': False, 'message': 'Recipient wallet not found'}), 404
 
-        # Оновлення балансів
-        sender.balances[coin_symbol] = float(sender.balances[coin_symbol]) - amount
-        if sender.balances[coin_symbol] == 0:
-            sender.balances[coin_symbol] = 0.0
-        else:
-            sender.balances[coin_symbol] = float(sender.balances[coin_symbol])
+        # Перевірка балансів до транзакції
+        sender_balance_before = float(sender.balances.get(coin_symbol, 0))
+        recipient_balance_before = float(recipient.balances.get(coin_symbol, 0))
 
+        # Оновлення балансів
+        sender.balances[coin_symbol] = sender_balance_before - amount
+        if sender.balances[coin_symbol] <= 0:
+            sender.balances[coin_symbol] = 0.0  # Уникаємо від’ємних балансів
         if coin_symbol not in recipient.balances:
             recipient.balances[coin_symbol] = 0.0
-        recipient.balances[coin_symbol] = float(recipient.balances[coin_symbol]) + amount
+        recipient.balances[coin_symbol] = recipient_balance_before + amount
 
+        # Отримання цін
         prices = cg.get_price(
             ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
             vs_currencies='usd'
@@ -366,13 +372,12 @@ def send_transaction():
         }.get(coin_symbol, coin_symbol.lower())
         usd_value = amount * float(prices.get(coin_id, {}).get('usd', 0.0) or 0.0)
 
-        # Дебаг: логування балансів до і після
-        logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient.balances[coin_symbol]}")
-
+        # Логування до і після
+        logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender_balance_before}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient_balance_before}")
         db.session.commit()
-
         logger.info(f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient.balances[coin_symbol]}")
 
+        # Запис дій
         log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, -amount)
         log_action(recipient.id, f'Received {amount} {coin_symbol} from user_id={user_id}', coin_symbol, amount)
 
