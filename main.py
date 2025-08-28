@@ -12,10 +12,8 @@ from sqlalchemy.sql import text
 
 app = Flask(__name__)
 
-# Configure CORS to allow all origins and methods
 CORS(app, resources={r"/*": {"origins": "*", "supports_credentials": True, "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}})
 
-# Database configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:FkLEPOrXzVjKQMRdtbQnhiXWYfjpkUFk@centerbeam.proxy.rlwy.net:52075/railway'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
@@ -25,23 +23,19 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_pre_ping': True
 }
 
-# Initialize database and migration
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 cg = CoinGeckoAPI()
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-# Seed phrase word list
 words = [
     'apple', 'ball', 'cat', 'dog', 'egg', 'fish', 'goat', 'hat', 'ice', 'jam', 'kit', 'log',
     'man', 'net', 'oak', 'pig', 'quilt', 'rat', 'sun', 'top', 'up', 'van', 'win', 'xray',
     'yak', 'zip', 'ant', 'bee', 'cow', 'duck', 'ear', 'fox', 'gun', 'hen', 'ink', 'jug'
 ]
 
-# Database models
 class User(db.Model):
     __tablename__ = 'user'
     id = db.Column(db.Integer, primary_key=True)
@@ -62,7 +56,6 @@ class Log(db.Model):
     amount = db.Column(db.Float, nullable=True)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
-# Utility functions
 def generate_seed():
     return ' '.join(random.choice(words) for _ in range(12))
 
@@ -86,7 +79,6 @@ def log_action(user_id, action, asset=None, amount=None):
         logger.error(f"Failed to log action: {str(e)}")
         db.session.rollback()
 
-# Ініціалізація бази даних
 def init_db():
     try:
         with app.app_context():
@@ -110,7 +102,6 @@ def init_db():
 with app.app_context():
     init_db()
 
-# CORS headers
 @app.after_request
 def add_cors_headers(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
@@ -119,7 +110,6 @@ def add_cors_headers(response):
     response.headers['Access-Control-Allow-Credentials'] = 'true'
     return response
 
-# Routes
 @app.route('/generate', methods=['POST', 'OPTIONS'])
 def generate_wallet():
     if request.method == 'OPTIONS':
@@ -200,7 +190,14 @@ def get_balances():
             ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
             vs_currencies='usd',
             include_24hr_change=True
-        ) or {}  # Резервне значення, якщо API не відповідає
+        ) or {
+            'bitcoin': {'usd': 60000.0, 'usd_24h_change': 0.0},
+            'ethereum': {'usd': 2500.0, 'usd_24h_change': 0.0},
+            'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
+            'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
+            'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
+            'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0}
+        }
         balances = [
             {
                 'name': {
@@ -208,7 +205,7 @@ def get_balances():
                     'UNI': 'Uniswap', 'KOGE': 'Koge', 'BR': 'Billionaire'
                 }.get(symbol, symbol),
                 'symbol': symbol,
-                'balance': float(balance) if balance is not None else 0.0,  # Очищення від NaN/null
+                'balance': float(balance) if balance is not None and not isinstance(balance, str) else 0.0,
                 'image': f"https://assets.coingecko.com/coins/images/{id}/thumb/{name}.png",
                 'price': float(prices.get(id, {}).get('usd', 0.0)) if prices.get(id) else 0.0
             }
@@ -249,7 +246,14 @@ def get_wallets():
             ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
             vs_currencies='usd',
             include_24hr_change=True
-        ) or {}
+        ) or {
+            'bitcoin': {'usd': 60000.0, 'usd_24h_change': 0.0},
+            'ethereum': {'usd': 2500.0, 'usd_24h_change': 0.0},
+            'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
+            'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
+            'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
+            'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0}
+        }
         log_action(user.id, 'Viewed wallets')
         logger.info(f"Wallets retrieved: user_id={user_id}")
         return jsonify({
@@ -302,7 +306,7 @@ def send_transaction():
         if sender.balances[coin_symbol] == 0:
             del sender.balances[coin_symbol]
         else:
-            sender.balances[coin_symbol] = float(sender.balances[coin_symbol])  # Очищення від NaN
+            sender.balances[coin_symbol] = float(sender.balances[coin_symbol])
 
         if coin_symbol not in recipient.balances:
             recipient.balances[coin_symbol] = 0.0
@@ -311,7 +315,14 @@ def send_transaction():
         prices = cg.get_price(
             ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
             vs_currencies='usd'
-        ) or {}
+        ) or {
+            'bitcoin': {'usd': 60000.0},
+            'ethereum': {'usd': 2500.0},
+            'stellar': {'usd': 0.1},
+            'uniswap': {'usd': 6.0},
+            'koge': {'usd': 0.01},
+            'billionaire': {'usd': 0.001}
+        }
         coin_id = {
             'BTC': 'bitcoin', 'ETH': 'ethereum', 'XLM': 'stellar',
             'UNI': 'uniswap', 'KOGE': 'koge', 'BR': 'billionaire'
@@ -344,12 +355,12 @@ def get_coin_details():
             logger.warning(f"User not found: user_id={user_id}")
             return jsonify({'success': False, 'message': 'User not found'}), 404
 
-        coin_id = coin_id.upper()  # Приводимо до верхнього регістру
+        coin_id = coin_id.upper()
         balance = float(user.balances.get(coin_id, 0.0)) if user.balances.get(coin_id) is not None else 0.0
         transactions = Log.query.filter_by(user_id=user_id, asset=coin_id).all()
         transaction_data = [
             {
-                'amount': float(tx.amount) if tx.amount is not None else 0.0,
+                'amount': float(tx.amount) if tx.amount is not None and not isinstance(tx.amount, str) else 0.0,
                 'asset': tx.asset,
                 'action': tx.action,
                 'timestamp': tx.timestamp.isoformat()
@@ -384,7 +395,7 @@ def get_transactions():
         transactions = Log.query.filter_by(user_id=user_id).order_by(Log.timestamp.desc()).all()
         transaction_data = [
             {
-                'amount': float(tx.amount) if tx.amount is not None else 0.0,
+                'amount': float(tx.amount) if tx.amount is not None and not isinstance(tx.amount, str) else 0.0,
                 'asset': tx.asset,
                 'action': tx.action,
                 'timestamp': tx.timestamp.isoformat()
