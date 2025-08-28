@@ -50,6 +50,7 @@ class User(db.Model):
     balances = db.Column(db.JSON, default=lambda: {
         'BTC': 0.0, 'ETH': 0.0, 'XLM': 0.0, 'UNI': 0.0, 'KOGE': 0.0, 'BR': 0.0
     })
+    address = db.Column(db.String(34), unique=True, nullable=True)  # Нове поле для TRC-20 адреси
 
 class Log(db.Model):
     __tablename__ = 'log'
@@ -67,6 +68,14 @@ def generate_seed():
 def generate_pin():
     return ''.join(random.choice(string.digits) for _ in range(6))
 
+def generate_trc20_address():
+    characters = string.ascii_letters + string.digits
+    address = 'T' + ''.join(random.choice(characters) for _ in range(33))
+    # Перевіряємо унікальність адреси
+    while User.query.filter_by(address=address).first():
+        address = 'T' + ''.join(random.choice(characters) for _ in range(33))
+    return address
+
 def log_action(user_id, action, asset=None, amount=None):
     try:
         log = Log(user_id=user_id, action=action, asset=asset, amount=amount)
@@ -75,6 +84,33 @@ def log_action(user_id, action, asset=None, amount=None):
     except Exception as e:
         logger.error(f"Failed to log action: {str(e)}")
         db.session.rollback()
+
+# Ініціалізація бази даних
+def init_db():
+    try:
+        with app.app_context():
+            # Створюємо таблиці, якщо вони ще не існують
+            db.create_all()
+            
+            # Перевіряємо, чи є колонка address у таблиці user
+            inspector = db.inspect(db.engine)
+            columns = [col['name'] for col in inspector.get_columns('user')]
+            if 'address' not in columns:
+                logger.info("Adding 'address' column to 'user' table")
+                db.engine.execute('ALTER TABLE "user" ADD COLUMN address VARCHAR(34) UNIQUE')
+            
+            # Перевіряємо користувачів без адрес і додаємо TRC-20 адреси
+            users_without_address = User.query.filter((User.address == None) | (User.address == '')).all()
+            for user in users_without_address:
+                user.address = generate_trc20_address()
+                logger.info(f"Generated TRC-20 address for user_id={user.id}: {user.address}")
+            db.session.commit()
+    except Exception as e:
+        logger.error(f"Error initializing database: {str(e)}")
+        db.session.rollback()
+
+# Викликаємо ініціалізацію при запуску
+init_db()
 
 # CORS headers for all responses
 @app.after_request
@@ -97,17 +133,19 @@ def generate_wallet():
             return jsonify({'success': False, 'message': 'PIN must be 6 digits'}), 400
 
         seed = generate_seed()
-        user = User(seed_phrase=seed, pin=pin, wallet_name='Main wallet')
+        address = generate_trc20_address()  # Генеруємо TRC-20 адресу
+        user = User(seed_phrase=seed, pin=pin, wallet_name='Main wallet', address=address)
         db.session.add(user)
         db.session.commit()
         log_action(user.id, 'Wallet created')
-        logger.info(f"Wallet created: id={user.id}, seed={seed}")
+        logger.info(f"Wallet created: id={user.id}, seed={seed}, address={address}")
         return jsonify({
             'success': True,
             'id': user.id,
             'seed': seed,
             'pin': pin,
-            'wallet_name': user.wallet_name
+            'wallet_name': user.wallet_name,
+            'address': user.address
         })
     except Exception as e:
         logger.error(f"Error in /generate: {str(e)}")
@@ -136,7 +174,8 @@ def login():
                 'success': True,
                 'id': user.id,
                 'balances': user.balances,
-                'wallet_name': user.wallet_name
+                'wallet_name': user.wallet_name,
+                'address': user.address
             })
         logger.warning(f"Invalid seed or PIN: seed={seed}")
         return jsonify({'success': False, 'message': 'Invalid seed or PIN'}), 401
@@ -164,11 +203,29 @@ def get_balances():
             vs_currencies='usd',
             include_24hr_change=True
         )
+        balances = [
+            {
+                'name': {
+                    'BTC': 'Bitcoin', 'ETH': 'Ethereum', 'XLM': 'Stellar', 
+                    'UNI': 'Uniswap', 'KOGE': 'Koge', 'BR': 'Billionaire'
+                }.get(symbol, symbol),
+                'symbol': symbol,
+                'balance': balance,
+                'image': f"https://assets.coingecko.com/coins/images/{id}/thumb/{name}.png",
+                'price': prices.get(id, {}).get('usd', 0.0)
+            }
+            for symbol, balance in user.balances.items()
+            for id, name in [
+                ('bitcoin', 'bitcoin'), ('ethereum', 'ethereum'), ('stellar', 'stellar'),
+                ('uniswap', 'uniswap'), ('koge', 'koge'), ('billionaire', 'billionaire')
+            ]
+            if symbol in user.balances
+        ]
         log_action(user.id, 'Viewed balances')
         logger.info(f"Balances retrieved: user_id={user_id}")
         return jsonify({
             'success': True,
-            'balances': user.balances,
+            'balances': balances,
             'prices': prices
         })
     except Exception as e:
@@ -189,7 +246,7 @@ def get_wallets():
             logger.warning(f"User not found: user_id={user_id}")
             return jsonify({'success': False, 'message': 'User not found'}), 404
 
-        wallets = [{'id': user.id, 'name': user.wallet_name}]
+        wallets = [{'id': user.id, 'name': user.wallet_name, 'address': user.address}]
         prices = cg.get_price(
             ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
             vs_currencies='usd',
@@ -205,6 +262,77 @@ def get_wallets():
         })
     except Exception as e:
         logger.error(f"Error in /get_wallets: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/send_transaction', methods=['POST', 'OPTIONS'])
+def send_transaction():
+    if request.method == 'OPTIONS':
+        return '', 204
+    try:
+        data = request.get_json()
+        user_id = data.get('user_id')
+        coin_symbol = data.get('coin_symbol')
+        amount = data.get('amount')
+        recipient_address = data.get('recipient_address')
+
+        if not all([user_id, coin_symbol, amount, recipient_address]):
+            return jsonify({'success': False, 'message': 'Missing required fields'}), 400
+
+        try:
+            amount = float(amount)
+            if amount <= 0:
+                return jsonify({'success': False, 'message': 'Invalid amount'}), 400
+        except ValueError:
+            return jsonify({'success': False, 'message': 'Invalid amount format'}), 400
+
+        # Перевіряємо відправника
+        sender = db.session.get(User, user_id)
+        if not sender:
+            logger.warning(f"Sender not found: user_id={user_id}")
+            return jsonify({'success': False, 'message': 'Sender not found'}), 404
+
+        # Перевіряємо баланс відправника
+        if coin_symbol not in sender.balances or sender.balances[coin_symbol] < amount:
+            logger.warning(f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}")
+            return jsonify({'success': False, 'message': 'Insufficient balance'}), 400
+
+        # Знаходимо отримувача за адресою
+        recipient = User.query.filter_by(address=recipient_address).first()
+        if not recipient:
+            logger.warning(f"Recipient not found: address={recipient_address}")
+            return jsonify({'success': False, 'message': 'Recipient wallet not found'}), 404
+
+        # Оновлюємо баланс відправника
+        sender.balances[coin_symbol] -= amount
+        if sender.balances[coin_symbol] == 0:
+            del sender.balances[coin_symbol]
+
+        # Оновлюємо баланс отримувача
+        if coin_symbol not in recipient.balances:
+            recipient.balances[coin_symbol] = 0.0
+        recipient.balances[coin_symbol] += amount
+
+        # Розраховуємо USD-еквівалент
+        prices = cg.get_price(
+            ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
+            vs_currencies='usd'
+        )
+        coin_id = {
+            'BTC': 'bitcoin', 'ETH': 'ethereum', 'XLM': 'stellar',
+            'UNI': 'uniswap', 'KOGE': 'koge', 'BR': 'billionaire'
+        }.get(coin_symbol, coin_symbol.lower())
+        usd_value = amount * prices.get(coin_id, {}).get('usd', 0.0)
+
+        # Логуємо транзакцію
+        log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, amount)
+        log_action(recipient.id, f'Received {amount} {coin_symbol} from user_id={user_id}', coin_symbol, amount)
+
+        db.session.commit()
+        logger.info(f"Transaction successful: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
+        return jsonify({'success': True, 'usd_value': usd_value})
+    except Exception as e:
+        logger.error(f"Error in /send_transaction: {str(e)}")
+        db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/get_coin_details', methods=['GET', 'OPTIONS'])
@@ -275,17 +403,19 @@ def admin_create_wallet():
     try:
         seed = generate_seed()
         pin = generate_pin()
-        user = User(seed_phrase=seed, pin=pin, wallet_name='Main wallet')
+        address = generate_trc20_address()  # Генеруємо TRC-20 адресу
+        user = User(seed_phrase=seed, pin=pin, wallet_name='Main wallet', address=address)
         db.session.add(user)
         db.session.commit()
         log_action(user.id, 'Admin created wallet')
-        logger.info(f"Admin created wallet: id={user.id}, seed={seed}")
+        logger.info(f"Admin created wallet: id={user.id}, seed={seed}, address={address}")
         return jsonify({
             'success': True,
             'id': user.id,
             'seed': seed,
             'pin': pin,
-            'wallet_name': user.wallet_name
+            'wallet_name': user.wallet_name,
+            'address': user.address
         })
     except Exception as e:
         logger.error(f"Error in /admin/create_wallet: {str(e)}")
