@@ -90,6 +90,17 @@ def init_db():
                 with db.engine.connect() as connection:
                     connection.execute(text('ALTER TABLE "user" ADD COLUMN address VARCHAR(34) UNIQUE'))
                     connection.commit()
+            columns = [col['name'] for col in inspector.get_columns('log')]
+            if 'asset' not in columns:
+                logger.info("Adding 'asset' column to 'log' table")
+                with db.engine.connect() as connection:
+                    connection.execute(text('ALTER TABLE log ADD COLUMN asset VARCHAR(10)'))
+                    connection.commit()
+            if 'amount' not in columns:
+                logger.info("Adding 'amount' column to 'log' table")
+                with db.engine.connect() as connection:
+                    connection.execute(text('ALTER TABLE log ADD COLUMN amount FLOAT'))
+                    connection.commit()
             users_without_address = User.query.filter((User.address == None) | (User.address == '')).all()
             for user in users_without_address:
                 user.address = generate_trc20_address()
@@ -198,6 +209,14 @@ def get_balances():
             'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
             'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0}
         }
+        token_images = {
+            'BTC': 'images/btc.png',
+            'ETH': 'images/eth.png',
+            'XLM': 'images/xlm.png',
+            'UNI': 'images/uni.png',
+            'KOGE': 'images/koge.png',
+            'BR': 'images/br.png'
+        }
         balances = [
             {
                 'name': {
@@ -206,15 +225,18 @@ def get_balances():
                 }.get(symbol, symbol),
                 'symbol': symbol,
                 'balance': float(balance) if balance is not None and not isinstance(balance, str) else 0.0,
-                'image': f"https://assets.coingecko.com/coins/images/{id}/thumb/{name}.png",
+                'image': token_images.get(symbol, 'images/default-coin.png'),
                 'price': float(prices.get(id, {}).get('usd', 0.0)) if prices.get(id) else 0.0
             }
             for symbol, balance in user.balances.items()
-            for id, name in [
-                ('bitcoin', 'bitcoin'), ('ethereum', 'ethereum'), ('stellar', 'stellar'),
-                ('uniswap', 'uniswap'), ('koge', 'koge'), ('billionaire', 'billionaire')
+            for id in [
+                'bitcoin' if symbol == 'BTC' else
+                'ethereum' if symbol == 'ETH' else
+                'stellar' if symbol == 'XLM' else
+                'uniswap' if symbol == 'UNI' else
+                'koge' if symbol == 'KOGE' else
+                'billionaire' if symbol == 'BR' else symbol.lower()
             ]
-            if symbol in user.balances
         ]
         log_action(user.id, 'Viewed balances')
         logger.info(f"Balances retrieved: user_id={user_id}, balances={balances}")
@@ -302,7 +324,8 @@ def send_transaction():
             logger.warning(f"Recipient not found: address={recipient_address}")
             return jsonify({'success': False, 'message': 'Recipient wallet not found'}), 404
 
-        sender.balances[coin_symbol] -= amount
+        # Оновлення балансів
+        sender.balances[coin_symbol] = float(sender.balances[coin_symbol]) - amount
         if sender.balances[coin_symbol] == 0:
             del sender.balances[coin_symbol]
         else:
@@ -329,10 +352,13 @@ def send_transaction():
         }.get(coin_symbol, coin_symbol.lower())
         usd_value = amount * float(prices.get(coin_id, {}).get('usd', 0.0) or 0.0)
 
+        # Збереження змін перед логуванням
+        db.session.commit()
+
+        # Логування транзакції
         log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, amount)
         log_action(recipient.id, f'Received {amount} {coin_symbol} from user_id={user_id}', coin_symbol, amount)
 
-        db.session.commit()
         logger.info(f"Transaction successful: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
         return jsonify({'success': True, 'usd_value': usd_value})
     except Exception as e:
