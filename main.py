@@ -51,7 +51,7 @@ class User(db.Model):
     balances = db.Column(db.JSON, default=lambda: {
         'BTC': 0.0, 'ETH': 0.0, 'XLM': 0.0, 'UNI': 0.0, 'KOGE': 0.0, 'BR': 0.0
     })
-    address = db.Column(db.String(34), unique=True, nullable=True)  # Нове поле для TRC-20 адреси
+    address = db.Column(db.String(34), unique=True, nullable=True)
 
 class Log(db.Model):
     __tablename__ = 'log'
@@ -72,7 +72,6 @@ def generate_pin():
 def generate_trc20_address():
     characters = string.ascii_letters + string.digits
     address = 'T' + ''.join(random.choice(characters) for _ in range(33))
-    # Перевіряємо унікальність адреси
     with app.app_context():
         while User.query.filter_by(address=address).first():
             address = 'T' + ''.join(random.choice(characters) for _ in range(33))
@@ -91,10 +90,7 @@ def log_action(user_id, action, asset=None, amount=None):
 def init_db():
     try:
         with app.app_context():
-            # Створюємо таблиці, якщо вони ще не існують
             db.create_all()
-            
-            # Перевіряємо, чи є колонка address у таблиці user
             inspector = db.inspect(db.engine)
             columns = [col['name'] for col in inspector.get_columns('user')]
             if 'address' not in columns:
@@ -102,8 +98,6 @@ def init_db():
                 with db.engine.connect() as connection:
                     connection.execute(text('ALTER TABLE "user" ADD COLUMN address VARCHAR(34) UNIQUE'))
                     connection.commit()
-            
-            # Перевіряємо користувачів без адрес і додаємо TRC-20 адреси
             users_without_address = User.query.filter((User.address == None) | (User.address == '')).all()
             for user in users_without_address:
                 user.address = generate_trc20_address()
@@ -113,11 +107,10 @@ def init_db():
         logger.error(f"Error initializing database: {str(e)}")
         db.session.rollback()
 
-# Викликаємо ініціалізацію після створення app
 with app.app_context():
     init_db()
 
-# CORS headers for all responses
+# CORS headers
 @app.after_request
 def add_cors_headers(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
@@ -138,7 +131,7 @@ def generate_wallet():
             return jsonify({'success': False, 'message': 'PIN must be 6 digits'}), 400
 
         seed = generate_seed()
-        address = generate_trc20_address()  # Генеруємо TRC-20 адресу
+        address = generate_trc20_address()
         user = User(seed_phrase=seed, pin=pin, wallet_name='Main wallet', address=address)
         db.session.add(user)
         db.session.commit()
@@ -207,17 +200,17 @@ def get_balances():
             ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
             vs_currencies='usd',
             include_24hr_change=True
-        )
+        ) or {}  # Резервне значення, якщо API не відповідає
         balances = [
             {
                 'name': {
-                    'BTC': 'Bitcoin', 'ETH': 'Ethereum', 'XLM': 'Stellar', 
+                    'BTC': 'Bitcoin', 'ETH': 'Ethereum', 'XLM': 'Stellar',
                     'UNI': 'Uniswap', 'KOGE': 'Koge', 'BR': 'Billionaire'
                 }.get(symbol, symbol),
                 'symbol': symbol,
-                'balance': balance,
+                'balance': float(balance) if balance is not None else 0.0,  # Очищення від NaN/null
                 'image': f"https://assets.coingecko.com/coins/images/{id}/thumb/{name}.png",
-                'price': prices.get(id, {}).get('usd', 0.0)
+                'price': float(prices.get(id, {}).get('usd', 0.0)) if prices.get(id) else 0.0
             }
             for symbol, balance in user.balances.items()
             for id, name in [
@@ -227,7 +220,7 @@ def get_balances():
             if symbol in user.balances
         ]
         log_action(user.id, 'Viewed balances')
-        logger.info(f"Balances retrieved: user_id={user_id}")
+        logger.info(f"Balances retrieved: user_id={user_id}, balances={balances}")
         return jsonify({
             'success': True,
             'balances': balances,
@@ -256,7 +249,7 @@ def get_wallets():
             ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
             vs_currencies='usd',
             include_24hr_change=True
-        )
+        ) or {}
         log_action(user.id, 'Viewed wallets')
         logger.info(f"Wallets retrieved: user_id={user_id}")
         return jsonify({
@@ -285,50 +278,46 @@ def send_transaction():
 
         try:
             amount = float(amount)
-            if amount <= 0:
+            if amount <= 0 or not isinstance(amount, (int, float)) or str(amount) == 'nan':
                 return jsonify({'success': False, 'message': 'Invalid amount'}), 400
-        except ValueError:
+        except (ValueError, TypeError):
             return jsonify({'success': False, 'message': 'Invalid amount format'}), 400
 
-        # Перевіряємо відправника
         sender = db.session.get(User, user_id)
         if not sender:
             logger.warning(f"Sender not found: user_id={user_id}")
             return jsonify({'success': False, 'message': 'Sender not found'}), 404
 
-        # Перевіряємо баланс відправника
+        coin_symbol = coin_symbol.upper()
         if coin_symbol not in sender.balances or sender.balances[coin_symbol] < amount:
             logger.warning(f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}")
             return jsonify({'success': False, 'message': 'Insufficient balance'}), 400
 
-        # Знаходимо отримувача за адресою
         recipient = User.query.filter_by(address=recipient_address).first()
         if not recipient:
             logger.warning(f"Recipient not found: address={recipient_address}")
             return jsonify({'success': False, 'message': 'Recipient wallet not found'}), 404
 
-        # Оновлюємо баланс відправника
         sender.balances[coin_symbol] -= amount
         if sender.balances[coin_symbol] == 0:
             del sender.balances[coin_symbol]
+        else:
+            sender.balances[coin_symbol] = float(sender.balances[coin_symbol])  # Очищення від NaN
 
-        # Оновлюємо баланс отримувача
         if coin_symbol not in recipient.balances:
             recipient.balances[coin_symbol] = 0.0
-        recipient.balances[coin_symbol] += amount
+        recipient.balances[coin_symbol] = float(recipient.balances[coin_symbol]) + amount
 
-        # Розраховуємо USD-еквівалент
         prices = cg.get_price(
             ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
             vs_currencies='usd'
-        )
+        ) or {}
         coin_id = {
             'BTC': 'bitcoin', 'ETH': 'ethereum', 'XLM': 'stellar',
             'UNI': 'uniswap', 'KOGE': 'koge', 'BR': 'billionaire'
         }.get(coin_symbol, coin_symbol.lower())
-        usd_value = amount * prices.get(coin_id, {}).get('usd', 0.0)
+        usd_value = amount * float(prices.get(coin_id, {}).get('usd', 0.0) or 0.0)
 
-        # Логуємо транзакцію
         log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, amount)
         log_action(recipient.id, f'Received {amount} {coin_symbol} from user_id={user_id}', coin_symbol, amount)
 
@@ -355,14 +344,20 @@ def get_coin_details():
             logger.warning(f"User not found: user_id={user_id}")
             return jsonify({'success': False, 'message': 'User not found'}), 404
 
-        balance = user.balances.get(coin_id.upper(), 0.0)
-        transactions = Log.query.filter_by(user_id=user_id, asset=coin_id.upper()).all()
+        coin_id = coin_id.upper()  # Приводимо до верхнього регістру
+        balance = float(user.balances.get(coin_id, 0.0)) if user.balances.get(coin_id) is not None else 0.0
+        transactions = Log.query.filter_by(user_id=user_id, asset=coin_id).all()
         transaction_data = [
-            {'amount': tx.amount, 'asset': tx.asset, 'action': tx.action, 'timestamp': tx.timestamp.isoformat()}
+            {
+                'amount': float(tx.amount) if tx.amount is not None else 0.0,
+                'asset': tx.asset,
+                'action': tx.action,
+                'timestamp': tx.timestamp.isoformat()
+            }
             for tx in transactions if tx.amount is not None
         ]
         log_action(user.id, f'Viewed coin details for {coin_id}')
-        logger.info(f"Coin details retrieved: user_id={user_id}, coin_id={coin_id}")
+        logger.info(f"Coin details retrieved: user_id={user_id}, coin_id={coin_id}, balance={balance}")
         return jsonify({
             'success': True,
             'balance': balance,
@@ -388,7 +383,12 @@ def get_transactions():
 
         transactions = Log.query.filter_by(user_id=user_id).order_by(Log.timestamp.desc()).all()
         transaction_data = [
-            {'amount': tx.amount, 'asset': tx.asset, 'action': tx.action, 'timestamp': tx.timestamp.isoformat()}
+            {
+                'amount': float(tx.amount) if tx.amount is not None else 0.0,
+                'asset': tx.asset,
+                'action': tx.action,
+                'timestamp': tx.timestamp.isoformat()
+            }
             for tx in transactions if tx.amount is not None
         ]
         log_action(user.id, 'Viewed transactions')
@@ -408,7 +408,7 @@ def admin_create_wallet():
     try:
         seed = generate_seed()
         pin = generate_pin()
-        address = generate_trc20_address()  # Генеруємо TRC-20 адресу
+        address = generate_trc20_address()
         user = User(seed_phrase=seed, pin=pin, wallet_name='Main wallet', address=address)
         db.session.add(user)
         db.session.commit()
@@ -435,18 +435,26 @@ def admin_add_balance():
         data = request.get_json()
         seed = data.get('seed')
         asset = data.get('asset')
-        amount = float(data.get('amount', 0))
-        if not seed or not asset or amount <= 0:
+        amount = data.get('amount')
+        if not seed or not asset or amount is None:
             return jsonify({'success': False, 'message': 'Invalid seed, asset, or amount'}), 400
+
+        try:
+            amount = float(amount)
+            if amount <= 0 or not isinstance(amount, (int, float)) or str(amount) == 'nan':
+                return jsonify({'success': False, 'message': 'Invalid amount'}), 400
+        except (ValueError, TypeError):
+            return jsonify({'success': False, 'message': 'Invalid amount format'}), 400
 
         user = User.query.filter_by(seed_phrase=seed).first()
         if not user:
             logger.warning(f"User not found: seed={seed}")
             return jsonify({'success': False, 'message': 'User not found'}), 404
 
+        asset = asset.upper()
         if asset not in user.balances:
             user.balances[asset] = 0.0
-        user.balances[asset] += amount
+        user.balances[asset] = float(user.balances[asset]) + amount
         db.session.commit()
         log_action(user.id, f'Admin added {amount} to {asset}', asset=asset, amount=amount)
         logger.info(f"Balance added: user_id={user.id}, asset={asset}, amount={amount}")
