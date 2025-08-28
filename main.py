@@ -356,7 +356,7 @@ def send_transaction():
         db.session.commit()
 
         # Логування транзакції
-        log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, amount)
+        log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, -amount)
         log_action(recipient.id, f'Received {amount} {coin_symbol} from user_id={user_id}', coin_symbol, amount)
 
         logger.info(f"Transaction successful: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
