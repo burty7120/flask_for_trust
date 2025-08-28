@@ -327,7 +327,7 @@ def send_transaction():
         # Оновлення балансів
         sender.balances[coin_symbol] = float(sender.balances[coin_symbol]) - amount
         if sender.balances[coin_symbol] == 0:
-            del sender.balances[coin_symbol]
+            sender.balances[coin_symbol] = 0.0  # Залишаємо 0.0 замість видалення
         else:
             sender.balances[coin_symbol] = float(sender.balances[coin_symbol])
 
