@@ -329,7 +329,7 @@ def send_transaction():
 
         coin_symbol = coin_symbol.upper()
         if coin_symbol not in sender.balances or sender.balances[coin_symbol] < amount:
-            logger.warning(f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}")
+            logger.warning(f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, balance={sender.balances.get(coin_symbol, 0)}, amount={amount}")
             return jsonify({'success': False, 'message': 'Insufficient balance'}), 400
 
         recipient = User.query.filter_by(address=recipient_address).first()
@@ -340,7 +340,7 @@ def send_transaction():
         # Оновлення балансів
         sender.balances[coin_symbol] = float(sender.balances[coin_symbol]) - amount
         if sender.balances[coin_symbol] == 0:
-            sender.balances[coin_symbol] = 0.0  # Залишаємо 0.0 замість видалення
+            sender.balances[coin_symbol] = 0.0
         else:
             sender.balances[coin_symbol] = float(sender.balances[coin_symbol])
 
@@ -365,10 +365,13 @@ def send_transaction():
         }.get(coin_symbol, coin_symbol.lower())
         usd_value = amount * float(prices.get(coin_id, {}).get('usd', 0.0) or 0.0)
 
-        # Збереження змін перед логуванням
+        # Дебаг: логування балансів до і після
+        logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient.balances[coin_symbol]}")
+
         db.session.commit()
 
-        # Логування транзакції
+        logger.info(f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient.balances[coin_symbol]}")
+
         log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, -amount)
         log_action(recipient.id, f'Received {amount} {coin_symbol} from user_id={user_id}', coin_symbol, amount)
 
