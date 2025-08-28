@@ -189,8 +189,9 @@ def get_balances():
         return '', 204
     try:
         user_id = request.args.get('user_id')
-        if not user_id:
-            return jsonify({'success': False, 'message': 'User ID is required'}), 400
+        if not user_id or user_id == 'null':
+            logger.warning(f"Invalid user_id: {user_id}")
+            return jsonify({'success': False, 'message': 'Invalid user ID'}), 400
 
         user = db.session.get(User, user_id)
         if not user:
