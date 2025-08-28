@@ -197,18 +197,30 @@ def get_balances():
             logger.warning(f"User not found: user_id={user_id}")
             return jsonify({'success': False, 'message': 'User not found'}), 404
 
-        prices = cg.get_price(
-            ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
-            vs_currencies='usd',
-            include_24hr_change=True
-        ) or {
-            'bitcoin': {'usd': 60000.0, 'usd_24h_change': 0.0},
-            'ethereum': {'usd': 2500.0, 'usd_24h_change': 0.0},
-            'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
-            'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
-            'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
-            'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0}
-        }
+        try:
+            prices = cg.get_price(
+                ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
+                vs_currencies='usd',
+                include_24hr_change=True
+            ) or {
+                'bitcoin': {'usd': 60000.0, 'usd_24h_change': 0.0},
+                'ethereum': {'usd': 2500.0, 'usd_24h_change': 0.0},
+                'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
+                'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
+                'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
+                'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0}
+            }
+        except Exception as e:
+            logger.error(f"Error fetching prices from CoinGecko: {str(e)}")
+            prices = {
+                'bitcoin': {'usd': 60000.0, 'usd_24h_change': 0.0},
+                'ethereum': {'usd': 2500.0, 'usd_24h_change': 0.0},
+                'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
+                'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
+                'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
+                'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0}
+            }
+
         token_images = {
             'BTC': 'images/btc.png',
             'ETH': 'images/eth.png',
@@ -237,6 +249,7 @@ def get_balances():
                 'koge' if symbol == 'KOGE' else
                 'billionaire' if symbol == 'BR' else symbol.lower()
             ]
+            if float(balance) > 0  # Фільтруємо баланси > 0
         ]
         log_action(user.id, 'Viewed balances')
         logger.info(f"Balances retrieved: user_id={user_id}, balances={balances}")
