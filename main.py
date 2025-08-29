@@ -329,7 +329,6 @@ def send_transaction():
             logger.warning(f"Invalid format: user_id={user_id}, amount={amount}")
             return jsonify({'success': False, 'message': 'Invalid user_id or amount format'}), 400
 
-        # Блокування записів
         sender = db.session.get(User, user_id)
         if not sender:
             logger.warning(f"Sender not found: user_id={user_id}")
@@ -358,10 +357,11 @@ def send_transaction():
         recipient.balances[coin_symbol] = recipient_balance_before + amount
 
         # Позначимо balances як змінені
-        db.session.execute('SELECT balances FROM "user" WHERE id = :id FOR UPDATE', {'id': user_id})
-        db.session.execute('SELECT balances FROM "user" WHERE id = :id FOR UPDATE', {'id': recipient.id})
-        db.session.execute('UPDATE "user" SET balances = :balances WHERE id = :id', {'balances': sender.balances, 'id': user_id})
-        db.session.execute('UPDATE "user" SET balances = :balances WHERE id = :id', {'balances': recipient.balances, 'id': recipient.id})
+        db.session.execute(text('SELECT balances FROM "user" WHERE id = :id FOR UPDATE'), {'id': user_id})
+        db.session.execute(text('SELECT balances FROM "user" WHERE id = :id FOR UPDATE'), {'id': recipient.id})
+        sender.balances = sender.balances  # Явно позначимо зміну
+        recipient.balances = recipient.balances  # Явно позначимо зміну
+        db.session.commit()
 
         # Отримання цін
         prices = cg.get_price(
@@ -383,7 +383,6 @@ def send_transaction():
 
         # Логування до і після
         logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender_balance_before}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient_balance_before}")
-        db.session.commit()
         logger.info(f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient.balances[coin_symbol]}")
 
         # Запис дій
