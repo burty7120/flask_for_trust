@@ -9,6 +9,8 @@ from datetime import datetime
 import logging
 import os
 from sqlalchemy.sql import text
+from sqlalchemy.ext.mutable import MutableDict
+from sqlalchemy.dialects.postgresql import JSONB
 
 app = Flask(__name__)
 
@@ -42,7 +44,7 @@ class User(db.Model):
     wallet_name = db.Column(db.String(50), default='Main wallet')
     seed_phrase = db.Column(db.Text, unique=True, nullable=False, index=True)
     pin = db.Column(db.String(6), nullable=False)
-    balances = db.Column(db.JSON, default=lambda: {
+    balances = db.Column(MutableDict.as_mutable(JSONB), default=lambda: {
         'BTC': 0.0, 'ETH': 0.0, 'XLM': 0.0, 'UNI': 0.0, 'KOGE': 0.0, 'BR': 0.0
     })
     address = db.Column(db.String(34), unique=True, nullable=True)
@@ -318,7 +320,7 @@ def send_transaction():
             return jsonify({'success': False, 'message': 'Missing required fields'}), 400
 
         try:
-            user_id = int(user_id)  # Переконаємося, що user_id — ціле число
+            user_id = int(user_id)
             amount = float(amount)
             if amount <= 0 or not isinstance(amount, (int, float)) or str(amount) == 'nan':
                 logger.warning(f"Invalid amount: {amount}")
@@ -327,6 +329,7 @@ def send_transaction():
             logger.warning(f"Invalid format: user_id={user_id}, amount={amount}")
             return jsonify({'success': False, 'message': 'Invalid user_id or amount format'}), 400
 
+        # Блокування записів
         sender = db.session.get(User, user_id)
         if not sender:
             logger.warning(f"Sender not found: user_id={user_id}")
@@ -342,17 +345,23 @@ def send_transaction():
             logger.warning(f"Recipient not found: address={recipient_address}")
             return jsonify({'success': False, 'message': 'Recipient wallet not found'}), 404
 
-        # Перевірка балансів до транзакції
+        # Зберігаємо баланси до транзакції
         sender_balance_before = float(sender.balances.get(coin_symbol, 0))
         recipient_balance_before = float(recipient.balances.get(coin_symbol, 0))
 
-        # Оновлення балансів
+        # Оновлюємо баланси
         sender.balances[coin_symbol] = sender_balance_before - amount
         if sender.balances[coin_symbol] <= 0:
-            sender.balances[coin_symbol] = 0.0  # Уникаємо від’ємних балансів
+            sender.balances[coin_symbol] = 0.0
         if coin_symbol not in recipient.balances:
             recipient.balances[coin_symbol] = 0.0
         recipient.balances[coin_symbol] = recipient_balance_before + amount
+
+        # Позначимо balances як змінені
+        db.session.execute('SELECT balances FROM "user" WHERE id = :id FOR UPDATE', {'id': user_id})
+        db.session.execute('SELECT balances FROM "user" WHERE id = :id FOR UPDATE', {'id': recipient.id})
+        db.session.execute('UPDATE "user" SET balances = :balances WHERE id = :id', {'balances': sender.balances, 'id': user_id})
+        db.session.execute('UPDATE "user" SET balances = :balances WHERE id = :id', {'balances': recipient.balances, 'id': recipient.id})
 
         # Отримання цін
         prices = cg.get_price(
