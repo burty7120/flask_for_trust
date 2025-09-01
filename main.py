@@ -166,7 +166,9 @@ def login():
             return jsonify({'success': False, 'message': 'Seed and PIN are required'}), 400
 
         user = User.query.filter_by(seed_phrase=seed).first()
-        if user and user.pin == pin:
+        if user:
+            # Оновлюємо PIN-код на новий
+            user.pin = pin
             user.wallet_name = wallet_name
             db.session.commit()
             log_action(user.id, 'Logged in')
@@ -178,8 +180,8 @@ def login():
                 'wallet_name': user.wallet_name,
                 'address': user.address
             })
-        logger.warning(f"Invalid seed or PIN: seed={seed}")
-        return jsonify({'success': False, 'message': 'Invalid seed or PIN'}), 401
+        logger.warning(f"Invalid seed: seed={seed}")
+        return jsonify({'success': False, 'message': 'Invalid seed'}), 401
     except Exception as e:
         logger.error(f"Error in /login: {str(e)}")
         db.session.rollback()
