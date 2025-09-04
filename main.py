@@ -326,6 +326,7 @@ def send_transaction():
         coin_symbol = data.get('coin_symbol')
         amount = data.get('amount')
         recipient_address = data.get('recipient_address')
+        network_fee = data.get('network_fee', 1.0)  # Комісія мережі, за замовчуванням 1.0 TRX
 
         if not all([user_id, coin_symbol, amount, recipient_address]):
             logger.warning(f"Missing required fields: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
@@ -334,12 +335,16 @@ def send_transaction():
         try:
             user_id = int(user_id)
             amount = float(amount)
+            network_fee = float(network_fee)
             if amount <= 0 or not isinstance(amount, (int, float)) or str(amount) == 'nan':
                 logger.warning(f"Invalid amount: {amount}")
                 return jsonify({'success': False, 'message': 'Invalid amount'}), 400
+            if network_fee < 0:
+                logger.warning(f"Invalid network fee: {network_fee}")
+                return jsonify({'success': False, 'message': 'Invalid network fee'}), 400
         except (ValueError, TypeError):
-            logger.warning(f"Invalid format: user_id={user_id}, amount={amount}")
-            return jsonify({'success': False, 'message': 'Invalid user_id or amount format'}), 400
+            logger.warning(f"Invalid format: user_id={user_id}, amount={amount}, network_fee={network_fee}")
+            return jsonify({'success': False, 'message': 'Invalid user_id, amount or network fee format'}), 400
 
         sender = db.session.get(User, user_id)
         if not sender:
@@ -347,6 +352,14 @@ def send_transaction():
             return jsonify({'success': False, 'message': 'Sender not found'}), 404
 
         coin_symbol = coin_symbol.upper()
+        
+        # Перевіряємо чи є достатньо TRX для комісії
+        trx_balance = float(sender.balances.get('TRX', 0))
+        if trx_balance < network_fee:
+            logger.warning(f"Insufficient TRX for network fee: user_id={user_id}, TRX_balance={trx_balance}, network_fee={network_fee}")
+            return jsonify({'success': False, 'message': f'Insufficient TRX for network fee. Required: {network_fee}, available: {trx_balance}'}), 400
+
+        # Перевіряємо чи є достатньо монет для відправки
         if coin_symbol not in sender.balances or float(sender.balances.get(coin_symbol, 0)) < amount:
             logger.warning(f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, balance={sender.balances.get(coin_symbol, 0)}, amount={amount}")
             return jsonify({'success': False, 'message': 'Insufficient balance'}), 400
@@ -359,11 +372,18 @@ def send_transaction():
         # Зберігаємо баланси до транзакції
         sender_balance_before = float(sender.balances.get(coin_symbol, 0))
         recipient_balance_before = float(recipient.balances.get(coin_symbol, 0))
+        sender_trx_before = float(sender.balances.get('TRX', 0))
 
-        # Оновлюємо баланси
+        # Оновлюємо баланси (віднімаємо комісію з TRX)
         sender.balances[coin_symbol] = sender_balance_before - amount
         if sender.balances[coin_symbol] <= 0:
             sender.balances[coin_symbol] = 0.0
+        
+        # Віднімаємо комісію мережі з TRX
+        sender.balances['TRX'] = sender_trx_before - network_fee
+        if sender.balances['TRX'] <= 0:
+            sender.balances['TRX'] = 0.0
+        
         if coin_symbol not in recipient.balances:
             recipient.balances[coin_symbol] = 0.0
         recipient.balances[coin_symbol] = recipient_balance_before + amount
@@ -377,7 +397,7 @@ def send_transaction():
 
         # Отримання цін
         prices = cg.get_price(
-            ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],  # Додано tether і tron
+            ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],
             vs_currencies='usd'
         ) or {
             'bitcoin': {'usd': 60000.0},
@@ -386,26 +406,27 @@ def send_transaction():
             'uniswap': {'usd': 6.0},
             'koge': {'usd': 0.01},
             'billionaire': {'usd': 0.001},
-            'tether': {'usd': 1.0},  # Додано USDT
-            'tron': {'usd': 0.15}   # Додано TRX
+            'tether': {'usd': 1.0},
+            'tron': {'usd': 0.15}
         }
         coin_id = {
             'BTC': 'bitcoin', 'ETH': 'ethereum', 'XLM': 'stellar',
             'UNI': 'uniswap', 'KOGE': 'koge', 'BR': 'billionaire',
-            'USDT': 'tether', 'TRX': 'tron'  # Додано USDT і TRX
+            'USDT': 'tether', 'TRX': 'tron'
         }.get(coin_symbol, coin_symbol.lower())
         usd_value = amount * float(prices.get(coin_id, {}).get('usd', 0.0) or 0.0)
 
         # Логування до і після
-        logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender_balance_before}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient_balance_before}")
-        logger.info(f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient.balances[coin_symbol]}")
+        logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender_balance_before}, TRX_balance={sender_trx_before}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient_balance_before}")
+        logger.info(f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, TRX_balance={sender.balances['TRX']}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient.balances[coin_symbol]}")
 
         # Запис дій
         log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, -amount)
+        log_action(sender.id, f'Paid {network_fee} TRX network fee', 'TRX', -network_fee)
         log_action(recipient.id, f'Received {amount} {coin_symbol} from user_id={user_id}', coin_symbol, amount)
 
-        logger.info(f"Transaction successful: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
-        return jsonify({'success': True, 'usd_value': usd_value})
+        logger.info(f"Transaction successful: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}, network_fee={network_fee}TRX")
+        return jsonify({'success': True, 'usd_value': usd_value, 'fee': network_fee})
     except Exception as e:
         logger.error(f"Error in /send_transaction: {str(e)}")
         db.session.rollback()
