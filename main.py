@@ -205,7 +205,7 @@ def get_balances():
 
         try:
             prices = cg.get_price(
-                ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
+                ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],  # Додано USDT і TRX
                 vs_currencies='usd',
                 include_24hr_change=True
             ) or {
@@ -214,7 +214,9 @@ def get_balances():
                 'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
                 'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
                 'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
-                'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0}
+                'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0},
+                'tether': {'usd': 1.0, 'usd_24h_change': 0.0},  # Додано USDT
+                'tron': {'usd': 0.15, 'usd_24h_change': 0.0}   # Додано TRX
             }
         except Exception as e:
             logger.error(f"Error fetching prices from CoinGecko: {str(e)}")
@@ -224,7 +226,9 @@ def get_balances():
                 'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
                 'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
                 'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
-                'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0}
+                'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0},
+                'tether': {'usd': 1.0, 'usd_24h_change': 0.0},  # Додано USDT
+                'tron': {'usd': 0.15, 'usd_24h_change': 0.0}   # Додано TRX
             }
 
         token_images = {
@@ -233,13 +237,16 @@ def get_balances():
             'XLM': 'images/xlm.png',
             'UNI': 'images/uni.png',
             'KOGE': 'images/koge.png',
-            'BR': 'images/br.png'
+            'BR': 'images/br.png',
+            'USDT': 'images/usdt.png',  # Додано USDT
+            'TRX': 'images/trx.png'    # Додано TRX
         }
         balances = [
             {
                 'name': {
                     'BTC': 'Bitcoin', 'ETH': 'Ethereum', 'XLM': 'Stellar',
-                    'UNI': 'Uniswap', 'KOGE': 'Koge', 'BR': 'Billionaire'
+                    'UNI': 'Uniswap', 'KOGE': 'Koge', 'BR': 'Billionaire',
+                    'USDT': 'Tether', 'TRX': 'TRON'  # Додано USDT і TRX
                 }.get(symbol, symbol),
                 'symbol': symbol,
                 'balance': float(balance) if balance is not None and not isinstance(balance, str) else 0.0,
@@ -253,7 +260,9 @@ def get_balances():
                 'stellar' if symbol == 'XLM' else
                 'uniswap' if symbol == 'UNI' else
                 'koge' if symbol == 'KOGE' else
-                'billionaire' if symbol == 'BR' else symbol.lower()
+                'billionaire' if symbol == 'BR' else
+                'tether' if symbol == 'USDT' else  # Додано USDT
+                'tron' if symbol == 'TRX' else symbol.lower()  # Додано TRX
             ]
             if float(balance) > 0  # Фільтруємо баланси > 0
         ]
