@@ -45,7 +45,8 @@ class User(db.Model):
     seed_phrase = db.Column(db.Text, unique=True, nullable=False, index=True)
     pin = db.Column(db.String(6), nullable=False)
     balances = db.Column(MutableDict.as_mutable(JSONB), default=lambda: {
-        'BTC': 0.0, 'ETH': 0.0, 'XLM': 0.0, 'UNI': 0.0, 'KOGE': 0.0, 'BR': 0.0
+        'BTC': 0.0, 'ETH': 0.0, 'XLM': 0.0, 'UNI': 0.0, 'KOGE': 0.0, 'BR': 0.0,
+        'USDT': 0.0, 'TRX': 0.0  # Додано USDT і TRX
     })
     address = db.Column(db.String(34), unique=True, nullable=True)
 
@@ -367,7 +368,7 @@ def send_transaction():
 
         # Отримання цін
         prices = cg.get_price(
-            ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
+            ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],  # Додано tether і tron
             vs_currencies='usd'
         ) or {
             'bitcoin': {'usd': 60000.0},
@@ -375,11 +376,14 @@ def send_transaction():
             'stellar': {'usd': 0.1},
             'uniswap': {'usd': 6.0},
             'koge': {'usd': 0.01},
-            'billionaire': {'usd': 0.001}
+            'billionaire': {'usd': 0.001},
+            'tether': {'usd': 1.0},  # Додано USDT
+            'tron': {'usd': 0.15}   # Додано TRX
         }
         coin_id = {
             'BTC': 'bitcoin', 'ETH': 'ethereum', 'XLM': 'stellar',
-            'UNI': 'uniswap', 'KOGE': 'koge', 'BR': 'billionaire'
+            'UNI': 'uniswap', 'KOGE': 'koge', 'BR': 'billionaire',
+            'USDT': 'tether', 'TRX': 'tron'  # Додано USDT і TRX
         }.get(coin_symbol, coin_symbol.lower())
         usd_value = amount * float(prices.get(coin_id, {}).get('usd', 0.0) or 0.0)
 
