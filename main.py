@@ -45,7 +45,7 @@ class User(db.Model):
     seed_phrase = db.Column(db.Text, unique=True, nullable=False, index=True)
     pin = db.Column(db.String(6), nullable=False)
     balances = db.Column(MutableDict.as_mutable(JSONB), default=lambda: {
-        'BTC': 0.0, 'ETH': 0.0, 'XLM': 0.0, 'UNI': 0.0, 'KOGE': 0.0, 'BR': 0.0, 'USDT': 0.0, 'TRX': 0.0
+        'BTC': 0.0, 'ETH': 0.0, 'XLM': 0.0, 'UNI': 0.0, 'KOGE': 0.0, 'BR': 0.0
     })
     address = db.Column(db.String(34), unique=True, nullable=True)
 
@@ -167,6 +167,7 @@ def login():
 
         user = User.query.filter_by(seed_phrase=seed).first()
         if user:
+            # Оновлюємо PIN-код на новий
             user.pin = pin
             user.wallet_name = wallet_name
             db.session.commit()
@@ -203,7 +204,7 @@ def get_balances():
 
         try:
             prices = cg.get_price(
-                ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],
+                ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
                 vs_currencies='usd',
                 include_24hr_change=True
             ) or {
@@ -212,9 +213,7 @@ def get_balances():
                 'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
                 'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
                 'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
-                'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0},
-                'tether': {'usd': 1.0, 'usd_24h_change': 0.0},
-                'tron': {'usd': 0.15, 'usd_24h_change': 0.0}
+                'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0}
             }
         except Exception as e:
             logger.error(f"Error fetching prices from CoinGecko: {str(e)}")
@@ -224,9 +223,7 @@ def get_balances():
                 'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
                 'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
                 'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
-                'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0},
-                'tether': {'usd': 1.0, 'usd_24h_change': 0.0},
-                'tron': {'usd': 0.15, 'usd_24h_change': 0.0}
+                'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0}
             }
 
         token_images = {
@@ -235,38 +232,29 @@ def get_balances():
             'XLM': 'images/xlm.png',
             'UNI': 'images/uni.png',
             'KOGE': 'images/koge.png',
-            'BR': 'images/br.png',
-            'USDT': 'images/usdt.png',
-            'TRX': 'images/trx.png'
+            'BR': 'images/br.png'
         }
         balances = [
             {
                 'name': {
-                    'BTC': 'Bitcoin',
-                    'ETH': 'Ethereum',
-                    'XLM': 'Stellar',
-                    'UNI': 'Uniswap',
-                    'KOGE': 'Koge',
-                    'BR': 'Billionaire',
-                    'USDT': 'Tether',
-                    'TRX': 'TRON'
+                    'BTC': 'Bitcoin', 'ETH': 'Ethereum', 'XLM': 'Stellar',
+                    'UNI': 'Uniswap', 'KOGE': 'Koge', 'BR': 'Billionaire'
                 }.get(symbol, symbol),
                 'symbol': symbol,
                 'balance': float(balance) if balance is not None and not isinstance(balance, str) else 0.0,
                 'image': token_images.get(symbol, 'images/default-coin.png'),
-                'price': float(prices.get({
-                    'BTC': 'bitcoin',
-                    'ETH': 'ethereum',
-                    'XLM': 'stellar',
-                    'UNI': 'uniswap',
-                    'KOGE': 'koge',
-                    'BR': 'billionaire',
-                    'USDT': 'tether',
-                    'TRX': 'tron'
-                }.get(symbol, symbol.lower()), {}).get('usd', 0.0))
+                'price': float(prices.get(id, {}).get('usd', 0.0)) if prices.get(id) else 0.0
             }
             for symbol, balance in user.balances.items()
-            if float(balance) > 0
+            for id in [
+                'bitcoin' if symbol == 'BTC' else
+                'ethereum' if symbol == 'ETH' else
+                'stellar' if symbol == 'XLM' else
+                'uniswap' if symbol == 'UNI' else
+                'koge' if symbol == 'KOGE' else
+                'billionaire' if symbol == 'BR' else symbol.lower()
+            ]
+            if float(balance) > 0  # Фільтруємо баланси > 0
         ]
         log_action(user.id, 'Viewed balances')
         logger.info(f"Balances retrieved: user_id={user_id}, balances={balances}")
@@ -295,7 +283,7 @@ def get_wallets():
 
         wallets = [{'id': user.id, 'name': user.wallet_name, 'address': user.address}]
         prices = cg.get_price(
-            ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],
+            ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
             vs_currencies='usd',
             include_24hr_change=True
         ) or {
@@ -304,9 +292,7 @@ def get_wallets():
             'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
             'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
             'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
-            'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0},
-            'tether': {'usd': 1.0, 'usd_24h_change': 0.0},
-            'tron': {'usd': 0.15, 'usd_24h_change': 0.0}
+            'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0}
         }
         log_action(user.id, 'Viewed wallets')
         logger.info(f"Wallets retrieved: user_id={user_id}")
@@ -351,42 +337,37 @@ def send_transaction():
             return jsonify({'success': False, 'message': 'Sender not found'}), 404
 
         coin_symbol = coin_symbol.upper()
-        TRX_FEE = 1.0
-        sender_balance_before = float(sender.balances.get(coin_symbol, 0.0))
-        sender_trx_balance = float(sender.balances.get('TRX', 0.0))
-        if sender_balance_before < amount:
-            logger.warning(f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, balance={sender_balance_before}, amount={amount}")
-            return jsonify({'success': False, 'message': 'Insufficient balance for transaction'}), 400
-        if sender_trx_balance < TRX_FEE:
-            logger.warning(f"Insufficient TRX for fee: user_id={user_id}, TRX_balance={sender_trx_balance}, fee={TRX_FEE}")
-            return jsonify({'success': False, 'message': 'Insufficient TRX for transaction fee'}), 400
+        if coin_symbol not in sender.balances or float(sender.balances.get(coin_symbol, 0)) < amount:
+            logger.warning(f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, balance={sender.balances.get(coin_symbol, 0)}, amount={amount}")
+            return jsonify({'success': False, 'message': 'Insufficient balance'}), 400
 
         recipient = User.query.filter_by(address=recipient_address).first()
         if not recipient:
             logger.warning(f"Recipient not found: address={recipient_address}")
             return jsonify({'success': False, 'message': 'Recipient wallet not found'}), 404
 
-        sender_balance_before = float(sender.balances.get(coin_symbol, 0.0))
-        recipient_balance_before = float(recipient.balances.get(coin_symbol, 0.0))
+        # Зберігаємо баланси до транзакції
+        sender_balance_before = float(sender.balances.get(coin_symbol, 0))
+        recipient_balance_before = float(recipient.balances.get(coin_symbol, 0))
 
+        # Оновлюємо баланси
         sender.balances[coin_symbol] = sender_balance_before - amount
-        sender.balances['TRX'] = sender_trx_balance - TRX_FEE
         if sender.balances[coin_symbol] <= 0:
             sender.balances[coin_symbol] = 0.0
-        if sender.balances['TRX'] <= 0:
-            sender.balances['TRX'] = 0.0
         if coin_symbol not in recipient.balances:
             recipient.balances[coin_symbol] = 0.0
         recipient.balances[coin_symbol] = recipient_balance_before + amount
 
+        # Позначимо balances як змінені
         db.session.execute(text('SELECT balances FROM "user" WHERE id = :id FOR UPDATE'), {'id': user_id})
         db.session.execute(text('SELECT balances FROM "user" WHERE id = :id FOR UPDATE'), {'id': recipient.id})
-        sender.balances = sender.balances
-        recipient.balances = recipient.balances
+        sender.balances = sender.balances  # Явно позначимо зміну
+        recipient.balances = recipient.balances  # Явно позначимо зміну
         db.session.commit()
 
+        # Отримання цін
         prices = cg.get_price(
-            ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],
+            ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
             vs_currencies='usd'
         ) or {
             'bitcoin': {'usd': 60000.0},
@@ -394,31 +375,24 @@ def send_transaction():
             'stellar': {'usd': 0.1},
             'uniswap': {'usd': 6.0},
             'koge': {'usd': 0.01},
-            'billionaire': {'usd': 0.001},
-            'tether': {'usd': 1.0},
-            'tron': {'usd': 0.15}
+            'billionaire': {'usd': 0.001}
         }
         coin_id = {
-            'BTC': 'bitcoin',
-            'ETH': 'ethereum',
-            'XLM': 'stellar',
-            'UNI': 'uniswap',
-            'KOGE': 'koge',
-            'BR': 'billionaire',
-            'USDT': 'tether',
-            'TRX': 'tron'
+            'BTC': 'bitcoin', 'ETH': 'ethereum', 'XLM': 'stellar',
+            'UNI': 'uniswap', 'KOGE': 'koge', 'BR': 'billionaire'
         }.get(coin_symbol, coin_symbol.lower())
         usd_value = amount * float(prices.get(coin_id, {}).get('usd', 0.0) or 0.0)
 
-        logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender_balance_before}, TRX_balance={sender_trx_balance}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient_balance_before}")
-        logger.info(f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, TRX_balance={sender.balances['TRX']}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient.balances[coin_symbol]}")
+        # Логування до і після
+        logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender_balance_before}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient_balance_before}")
+        logger.info(f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient.balances[coin_symbol]}")
 
+        # Запис дій
         log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, -amount)
-        log_action(sender.id, f'Paid {TRX_FEE} TRX fee for transaction', 'TRX', -TRX_FEE)
         log_action(recipient.id, f'Received {amount} {coin_symbol} from user_id={user_id}', coin_symbol, amount)
 
-        logger.info(f"Transaction successful: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}, fee={TRX_FEE}")
-        return jsonify({'success': True, 'usd_value': usd_value, 'fee': TRX_FEE})
+        logger.info(f"Transaction successful: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
+        return jsonify({'success': True, 'usd_value': usd_value})
     except Exception as e:
         logger.error(f"Error in /send_transaction: {str(e)}")
         db.session.rollback()
