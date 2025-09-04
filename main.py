@@ -45,7 +45,7 @@ class User(db.Model):
     seed_phrase = db.Column(db.Text, unique=True, nullable=False, index=True)
     pin = db.Column(db.String(6), nullable=False)
     balances = db.Column(MutableDict.as_mutable(JSONB), default=lambda: {
-        'BTC': 0.0, 'ETH': 0.0, 'XLM': 0.0, 'UNI': 0.0, 'KOGE': 0.0, 'BR': 0.0
+        'BTC': 0.0, 'ETH': 0.0, 'XLM': 0.0, 'UNI': 0.0, 'KOGE': 0.0, 'BR': 0.0, 'USDT': 0.0, 'TRX': 0.0
     })
     address = db.Column(db.String(34), unique=True, nullable=True)
 
@@ -337,9 +337,16 @@ def send_transaction():
             return jsonify({'success': False, 'message': 'Sender not found'}), 404
 
         coin_symbol = coin_symbol.upper()
-        if coin_symbol not in sender.balances or float(sender.balances.get(coin_symbol, 0)) < amount:
-            logger.warning(f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, balance={sender.balances.get(coin_symbol, 0)}, amount={amount}")
-            return jsonify({'success': False, 'message': 'Insufficient balance'}), 400
+        # Перевірка балансу відправника для монети та TRX для комісії
+        TRX_FEE = 1.0  # Фіксована комісія в TRX
+        sender_balance_before = float(sender.balances.get(coin_symbol, 0.0))
+        sender_trx_balance = float(sender.balances.get('TRX', 0.0))
+        if sender_balance_before < amount:
+            logger.warning(f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, balance={sender_balance_before}, amount={amount}")
+            return jsonify({'success': False, 'message': 'Insufficient balance for transaction'}), 400
+        if sender_trx_balance < TRX_FEE:
+            logger.warning(f"Insufficient TRX for fee: user_id={user_id}, TRX_balance={sender_trx_balance}, fee={TRX_FEE}")
+            return jsonify({'success': False, 'message': 'Insufficient TRX for transaction fee'}), 400
 
         recipient = User.query.filter_by(address=recipient_address).first()
         if not recipient:
@@ -347,13 +354,16 @@ def send_transaction():
             return jsonify({'success': False, 'message': 'Recipient wallet not found'}), 404
 
         # Зберігаємо баланси до транзакції
-        sender_balance_before = float(sender.balances.get(coin_symbol, 0))
-        recipient_balance_before = float(recipient.balances.get(coin_symbol, 0))
+        sender_balance_before = float(sender.balances.get(coin_symbol, 0.0))
+        recipient_balance_before = float(recipient.balances.get(coin_symbol, 0.0))
 
         # Оновлюємо баланси
         sender.balances[coin_symbol] = sender_balance_before - amount
+        sender.balances['TRX'] = sender_trx_balance - TRX_FEE
         if sender.balances[coin_symbol] <= 0:
             sender.balances[coin_symbol] = 0.0
+        if sender.balances['TRX'] <= 0:
+            sender.balances['TRX'] = 0.0
         if coin_symbol not in recipient.balances:
             recipient.balances[coin_symbol] = 0.0
         recipient.balances[coin_symbol] = recipient_balance_before + amount
@@ -367,7 +377,7 @@ def send_transaction():
 
         # Отримання цін
         prices = cg.get_price(
-            ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire'],
+            ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],
             vs_currencies='usd'
         ) or {
             'bitcoin': {'usd': 60000.0},
@@ -375,24 +385,28 @@ def send_transaction():
             'stellar': {'usd': 0.1},
             'uniswap': {'usd': 6.0},
             'koge': {'usd': 0.01},
-            'billionaire': {'usd': 0.001}
+            'billionaire': {'usd': 0.001},
+            'tether': {'usd': 1.0},
+            'tron': {'usd': 0.15}
         }
         coin_id = {
             'BTC': 'bitcoin', 'ETH': 'ethereum', 'XLM': 'stellar',
-            'UNI': 'uniswap', 'KOGE': 'koge', 'BR': 'billionaire'
+            'UNI': 'uniswap', 'KOGE': 'koge', 'BR': 'billionaire',
+            'USDT': 'tether', 'TRX': 'tron'
         }.get(coin_symbol, coin_symbol.lower())
         usd_value = amount * float(prices.get(coin_id, {}).get('usd', 0.0) or 0.0)
 
         # Логування до і після
-        logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender_balance_before}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient_balance_before}")
-        logger.info(f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient.balances[coin_symbol]}")
+        logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender_balance_before}, TRX_balance={sender_trx_balance}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient_balance_before}")
+        logger.info(f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, TRX_balance={sender.balances['TRX']}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient.balances[coin_symbol]}")
 
         # Запис дій
         log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, -amount)
+        log_action(sender.id, f'Paid {TRX_FEE} TRX fee for transaction', 'TRX', -TRX_FEE)
         log_action(recipient.id, f'Received {amount} {coin_symbol} from user_id={user_id}', coin_symbol, amount)
 
-        logger.info(f"Transaction successful: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
-        return jsonify({'success': True, 'usd_value': usd_value})
+        logger.info(f"Transaction successful: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}, fee={TRX_FEE}")
+        return jsonify({'success': True, 'usd_value': usd_value, 'fee': TRX_FEE})
     except Exception as e:
         logger.error(f"Error in /send_transaction: {str(e)}")
         db.session.rollback()
