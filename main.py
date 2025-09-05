@@ -16,7 +16,7 @@ app = Flask(__name__)
 
 CORS(app, resources={r"/*": {"origins": "*", "supports_credentials": True, "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}})
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:FkLEPOrXzVjKQMRdtbQnhiXWYfjpkUFk@centerbeam.proxy.rlwy.net:52075/railway'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:ZXlFWOKNnvLBaVPtNBqFoCKHCWVBJzgX@hopper.proxy.rlwy.net:21971/railway'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_size': 10,
