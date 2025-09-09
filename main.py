@@ -364,14 +364,8 @@ def send_transaction():
             logger.warning(f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, balance={sender.balances.get(coin_symbol, 0)}, amount={amount}")
             return jsonify({'success': False, 'message': 'Insufficient balance'}), 400
 
-        recipient = User.query.filter_by(address=recipient_address).first()
-        if not recipient:
-            logger.warning(f"Recipient not found: address={recipient_address}")
-            return jsonify({'success': False, 'message': 'Recipient wallet not found'}), 404
-
         # Зберігаємо баланси до транзакції
         sender_balance_before = float(sender.balances.get(coin_symbol, 0))
-        recipient_balance_before = float(recipient.balances.get(coin_symbol, 0))
         sender_trx_before = float(sender.balances.get('TRX', 0))
 
         # Оновлюємо баланси (віднімаємо комісію з TRX)
@@ -384,15 +378,9 @@ def send_transaction():
         if sender.balances['TRX'] <= 0:
             sender.balances['TRX'] = 0.0
         
-        if coin_symbol not in recipient.balances:
-            recipient.balances[coin_symbol] = 0.0
-        recipient.balances[coin_symbol] = recipient_balance_before + amount
-
         # Позначимо balances як змінені
         db.session.execute(text('SELECT balances FROM "user" WHERE id = :id FOR UPDATE'), {'id': user_id})
-        db.session.execute(text('SELECT balances FROM "user" WHERE id = :id FOR UPDATE'), {'id': recipient.id})
         sender.balances = sender.balances  # Явно позначимо зміну
-        recipient.balances = recipient.balances  # Явно позначимо зміну
         db.session.commit()
 
         # Отримання цін
@@ -417,15 +405,14 @@ def send_transaction():
         usd_value = amount * float(prices.get(coin_id, {}).get('usd', 0.0) or 0.0)
 
         # Логування до і після
-        logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender_balance_before}, TRX_balance={sender_trx_before}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient_balance_before}")
-        logger.info(f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, TRX_balance={sender.balances['TRX']}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient.balances[coin_symbol]}")
+        logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender_balance_before}, TRX_balance={sender_trx_before}")
+        logger.info(f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, TRX_balance={sender.balances['TRX']}")
 
-        # Запис дій
-        log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, -amount)
+        # Запис дій (відправка в нікуда)
+        log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address} (external wallet)', coin_symbol, -amount)
         log_action(sender.id, f'Paid {network_fee} TRX network fee', 'TRX', -network_fee)
-        log_action(recipient.id, f'Received {amount} {coin_symbol} from user_id={user_id}', coin_symbol, amount)
 
-        logger.info(f"Transaction successful: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}, network_fee={network_fee}TRX")
+        logger.info(f"Transaction successful (external): user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}, network_fee={network_fee}TRX")
         return jsonify({'success': True, 'usd_value': usd_value, 'fee': network_fee})
     except Exception as e:
         logger.error(f"Error in /send_transaction: {str(e)}")
