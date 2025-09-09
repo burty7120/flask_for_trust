@@ -11,17 +11,12 @@ import os
 from sqlalchemy.sql import text
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.dialects.postgresql import JSONB
-import threading
-import queue
-import time
 
 app = Flask(__name__)
 
-CORS(app, resources={r"/*": {"origins": "*", "supports_credentials": True, "methods": ["GET", "POST", "OPTIONS"],
-                             "allow_headers": ["Content-Type", "Authorization"]}})
+CORS(app, resources={r"/*": {"origins": "*", "supports_credentials": True, "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}})
 
-app.config[
-    'SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:ZXlFWOKNnvLBaVPtNBqFoCKHCWVBJzgX@hopper.proxy.rlwy.net:21971/railway'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:ZXlFWOKNnvLBaVPtNBqFoCKHCWVBJzgX@hopper.proxy.rlwy.net:21971/railway'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_size': 10,
@@ -33,7 +28,6 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 cg = CoinGeckoAPI()
-transaction_queue = queue.Queue()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -43,7 +37,6 @@ words = [
     'man', 'net', 'oak', 'pig', 'quilt', 'rat', 'sun', 'top', 'up', 'van', 'win', 'xray',
     'yak', 'zip', 'ant', 'bee', 'cow', 'duck', 'ear', 'fox', 'gun', 'hen', 'ink', 'jug'
 ]
-
 
 class User(db.Model):
     __tablename__ = 'user'
@@ -57,7 +50,6 @@ class User(db.Model):
     })
     address = db.Column(db.String(34), unique=True, nullable=True)
 
-
 class Log(db.Model):
     __tablename__ = 'log'
     id = db.Column(db.Integer, primary_key=True)
@@ -67,14 +59,11 @@ class Log(db.Model):
     amount = db.Column(db.Float, nullable=True)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
-
 def generate_seed():
     return ' '.join(random.choice(words) for _ in range(12))
 
-
 def generate_pin():
     return ''.join(random.choice(string.digits) for _ in range(6))
-
 
 def generate_trc20_address():
     characters = string.ascii_letters + string.digits
@@ -84,7 +73,6 @@ def generate_trc20_address():
             address = 'T' + ''.join(random.choice(characters) for _ in range(33))
     return address
 
-
 def log_action(user_id, action, asset=None, amount=None):
     try:
         log = Log(user_id=user_id, action=action, asset=asset, amount=amount)
@@ -93,7 +81,6 @@ def log_action(user_id, action, asset=None, amount=None):
     except Exception as e:
         logger.error(f"Failed to log action: {str(e)}")
         db.session.rollback()
-
 
 def init_db():
     try:
@@ -126,10 +113,8 @@ def init_db():
         logger.error(f"Error initializing database: {str(e)}")
         db.session.rollback()
 
-
 with app.app_context():
     init_db()
-
 
 @app.after_request
 def add_cors_headers(response):
@@ -138,7 +123,6 @@ def add_cors_headers(response):
     response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
     response.headers['Access-Control-Allow-Credentials'] = 'true'
     return response
-
 
 @app.route('/generate', methods=['POST', 'OPTIONS'])
 def generate_wallet():
@@ -169,7 +153,6 @@ def generate_wallet():
         logger.error(f"Error in /generate: {str(e)}")
         db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
-
 
 @app.route('/login', methods=['POST', 'OPTIONS'])
 def login():
@@ -205,7 +188,6 @@ def login():
         db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
 
-
 @app.route('/get_balances', methods=['GET', 'OPTIONS'])
 def get_balances():
     if request.method == 'OPTIONS':
@@ -223,20 +205,19 @@ def get_balances():
 
         try:
             prices = cg.get_price(
-                ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],
-                # Додано USDT і TRX
+                ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],  # Додано USDT і TRX
                 vs_currencies='usd',
                 include_24hr_change=True
             ) or {
-                         'bitcoin': {'usd': 60000.0, 'usd_24h_change': 0.0},
-                         'ethereum': {'usd': 2500.0, 'usd_24h_change': 0.0},
-                         'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
-                         'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
-                         'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
-                         'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0},
-                         'tether': {'usd': 1.0, 'usd_24h_change': 0.0},  # Додано USDT
-                         'tron': {'usd': 0.15, 'usd_24h_change': 0.0}  # Додано TRX
-                     }
+                'bitcoin': {'usd': 60000.0, 'usd_24h_change': 0.0},
+                'ethereum': {'usd': 2500.0, 'usd_24h_change': 0.0},
+                'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
+                'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
+                'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
+                'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0},
+                'tether': {'usd': 1.0, 'usd_24h_change': 0.0},  # Додано USDT
+                'tron': {'usd': 0.15, 'usd_24h_change': 0.0}   # Додано TRX
+            }
         except Exception as e:
             logger.error(f"Error fetching prices from CoinGecko: {str(e)}")
             prices = {
@@ -247,7 +228,7 @@ def get_balances():
                 'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
                 'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0},
                 'tether': {'usd': 1.0, 'usd_24h_change': 0.0},  # Додано USDT
-                'tron': {'usd': 0.15, 'usd_24h_change': 0.0}  # Додано TRX
+                'tron': {'usd': 0.15, 'usd_24h_change': 0.0}   # Додано TRX
             }
 
         token_images = {
@@ -258,7 +239,7 @@ def get_balances():
             'KOGE': 'images/koge.png',
             'BR': 'images/br.png',
             'USDT': 'images/usdt.png',  # Додано USDT
-            'TRX': 'images/trx.png'  # Додано TRX
+            'TRX': 'images/trx.png'    # Додано TRX
         }
         balances = [
             {
@@ -296,7 +277,6 @@ def get_balances():
         logger.error(f"Error in /get_balances: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
-
 @app.route('/get_wallets', methods=['GET', 'OPTIONS'])
 def get_wallets():
     if request.method == 'OPTIONS':
@@ -317,13 +297,13 @@ def get_wallets():
             vs_currencies='usd',
             include_24hr_change=True
         ) or {
-                     'bitcoin': {'usd': 60000.0, 'usd_24h_change': 0.0},
-                     'ethereum': {'usd': 2500.0, 'usd_24h_change': 0.0},
-                     'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
-                     'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
-                     'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
-                     'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0}
-                 }
+            'bitcoin': {'usd': 60000.0, 'usd_24h_change': 0.0},
+            'ethereum': {'usd': 2500.0, 'usd_24h_change': 0.0},
+            'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
+            'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
+            'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
+            'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0}
+        }
         log_action(user.id, 'Viewed wallets')
         logger.info(f"Wallets retrieved: user_id={user_id}")
         return jsonify({
@@ -336,19 +316,6 @@ def get_wallets():
         logger.error(f"Error in /get_wallets: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
-
-def is_valid_trc20_address(address):
-    """Basic validation for TRC-20 addresses"""
-    if not address or not isinstance(address, str):
-        return False
-    # TRC-20 addresses typically start with 'T' and are 34 characters long
-    if len(address) != 34 or not address.startswith('T'):
-        return False
-    # Check if it contains only valid characters
-    valid_chars = string.ascii_letters + string.digits
-    return all(char in valid_chars for char in address)
-
-
 @app.route('/send_transaction', methods=['POST', 'OPTIONS'])
 def send_transaction():
     if request.method == 'OPTIONS':
@@ -359,11 +326,10 @@ def send_transaction():
         coin_symbol = data.get('coin_symbol')
         amount = data.get('amount')
         recipient_address = data.get('recipient_address')
-        network_fee = data.get('network_fee', 1.0)
+        network_fee = data.get('network_fee', 1.0)  # Комісія мережі, за замовчуванням 1.0 TRX
 
         if not all([user_id, coin_symbol, amount, recipient_address]):
-            logger.warning(
-                f"Missing required fields: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
+            logger.warning(f"Missing required fields: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
             return jsonify({'success': False, 'message': 'Missing required fields'}), 400
 
         try:
@@ -386,35 +352,63 @@ def send_transaction():
             return jsonify({'success': False, 'message': 'Sender not found'}), 404
 
         coin_symbol = coin_symbol.upper()
-
+        
         # Перевіряємо чи є достатньо TRX для комісії
         trx_balance = float(sender.balances.get('TRX', 0))
         if trx_balance < network_fee:
-            logger.warning(
-                f"Insufficient TRX for network fee: user_id={user_id}, TRX_balance={trx_balance}, network_fee={network_fee}")
-            return jsonify({'success': False,
-                            'message': f'Insufficient TRX for network fee. Required: {network_fee}, available: {trx_balance}'}), 400
+            logger.warning(f"Insufficient TRX for network fee: user_id={user_id}, TRX_balance={trx_balance}, network_fee={network_fee}")
+            return jsonify({'success': False, 'message': f'Insufficient TRX for network fee. Required: {network_fee}, available: {trx_balance}'}), 400
 
         # Перевіряємо чи є достатньо монет для відправки
         if coin_symbol not in sender.balances or float(sender.balances.get(coin_symbol, 0)) < amount:
-            logger.warning(
-                f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, balance={sender.balances.get(coin_symbol, 0)}, amount={amount}")
+            logger.warning(f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, balance={sender.balances.get(coin_symbol, 0)}, amount={amount}")
             return jsonify({'success': False, 'message': 'Insufficient balance'}), 400
 
-        # Отримання цін для миттєвого повернення
+        recipient = User.query.filter_by(address=recipient_address).first()
+        if not recipient:
+            logger.warning(f"Recipient not found: address={recipient_address}")
+            return jsonify({'success': False, 'message': 'Recipient wallet not found'}), 404
+
+        # Зберігаємо баланси до транзакції
+        sender_balance_before = float(sender.balances.get(coin_symbol, 0))
+        recipient_balance_before = float(recipient.balances.get(coin_symbol, 0))
+        sender_trx_before = float(sender.balances.get('TRX', 0))
+
+        # Оновлюємо баланси (віднімаємо комісію з TRX)
+        sender.balances[coin_symbol] = sender_balance_before - amount
+        if sender.balances[coin_symbol] <= 0:
+            sender.balances[coin_symbol] = 0.0
+        
+        # Віднімаємо комісію мережі з TRX
+        sender.balances['TRX'] = sender_trx_before - network_fee
+        if sender.balances['TRX'] <= 0:
+            sender.balances['TRX'] = 0.0
+        
+        if coin_symbol not in recipient.balances:
+            recipient.balances[coin_symbol] = 0.0
+        recipient.balances[coin_symbol] = recipient_balance_before + amount
+
+        # Позначимо balances як змінені
+        db.session.execute(text('SELECT balances FROM "user" WHERE id = :id FOR UPDATE'), {'id': user_id})
+        db.session.execute(text('SELECT balances FROM "user" WHERE id = :id FOR UPDATE'), {'id': recipient.id})
+        sender.balances = sender.balances  # Явно позначимо зміну
+        recipient.balances = recipient.balances  # Явно позначимо зміну
+        db.session.commit()
+
+        # Отримання цін
         prices = cg.get_price(
             ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],
             vs_currencies='usd'
         ) or {
-                     'bitcoin': {'usd': 60000.0},
-                     'ethereum': {'usd': 2500.0},
-                     'stellar': {'usd': 0.1},
-                     'uniswap': {'usd': 6.0},
-                     'koge': {'usd': 0.01},
-                     'billionaire': {'usd': 0.001},
-                     'tether': {'usd': 1.0},
-                     'tron': {'usd': 0.15}
-                 }
+            'bitcoin': {'usd': 60000.0},
+            'ethereum': {'usd': 2500.0},
+            'stellar': {'usd': 0.1},
+            'uniswap': {'usd': 6.0},
+            'koge': {'usd': 0.01},
+            'billionaire': {'usd': 0.001},
+            'tether': {'usd': 1.0},
+            'tron': {'usd': 0.15}
+        }
         coin_id = {
             'BTC': 'bitcoin', 'ETH': 'ethereum', 'XLM': 'stellar',
             'UNI': 'uniswap', 'KOGE': 'koge', 'BR': 'billionaire',
@@ -422,127 +416,21 @@ def send_transaction():
         }.get(coin_symbol, coin_symbol.lower())
         usd_value = amount * float(prices.get(coin_id, {}).get('usd', 0.0) or 0.0)
 
-        # Додаємо транзакцію в чергу для асинхронної обробки
-        transaction_data = {
-            'user_id': user_id,
-            'coin_symbol': coin_symbol,
-            'amount': amount,
-            'recipient_address': recipient_address,
-            'network_fee': network_fee,
-            'usd_value': usd_value,
-            'timestamp': datetime.utcnow().isoformat()
-        }
+        # Логування до і після
+        logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender_balance_before}, TRX_balance={sender_trx_before}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient_balance_before}")
+        logger.info(f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, TRX_balance={sender.balances['TRX']}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient.balances[coin_symbol]}")
 
-        transaction_queue.put(transaction_data)
+        # Запис дій
+        log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, -amount)
+        log_action(sender.id, f'Paid {network_fee} TRX network fee', 'TRX', -network_fee)
+        log_action(recipient.id, f'Received {amount} {coin_symbol} from user_id={user_id}', coin_symbol, amount)
 
-        logger.info(
-            f"Transaction queued: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
-
-        # Миттєво повертаємо успішну відповідь
-        return jsonify({
-            'success': True,
-            'usd_value': usd_value,
-            'fee': network_fee,
-            'message': 'Transaction queued successfully'
-        })
-
+        logger.info(f"Transaction successful: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}, network_fee={network_fee}TRX")
+        return jsonify({'success': True, 'usd_value': usd_value, 'fee': network_fee})
     except Exception as e:
         logger.error(f"Error in /send_transaction: {str(e)}")
+        db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
-
-
-def process_transaction_queue():
-    """Функція для асинхронної обробки транзакцій"""
-    while True:
-        try:
-            if not transaction_queue.empty():
-                transaction_data = transaction_queue.get()
-
-                try:
-                    with app.app_context():
-                        process_single_transaction(transaction_data)
-                        logger.info(f"Transaction processed successfully: {transaction_data}")
-
-                except Exception as e:
-                    logger.error(f"Error processing transaction {transaction_data}: {str(e)}")
-
-                finally:
-                    transaction_queue.task_done()
-
-            time.sleep(1)  # Чекаємо 1 секунду між перевірками
-
-        except Exception as e:
-            logger.error(f"Error in transaction queue processing: {str(e)}")
-            time.sleep(5)
-
-
-def process_single_transaction(transaction_data):
-    """Обробка однієї транзакції"""
-    user_id = transaction_data['user_id']
-    coin_symbol = transaction_data['coin_symbol']
-    amount = transaction_data['amount']
-    recipient_address = transaction_data['recipient_address']
-    network_fee = transaction_data['network_fee']
-
-    sender = db.session.get(User, user_id)
-    if not sender:
-        logger.error(f"Sender not found during processing: user_id={user_id}")
-        return
-
-    # Шукаємо отримувача за адресою
-    recipient = User.query.filter_by(address=recipient_address).first()
-
-    # Якщо отримувача не знайдено - створюємо новий гаманець
-    if not recipient:
-        logger.info(f"Recipient not found, creating new wallet for address: {recipient_address}")
-
-        # Генеруємо seed та PIN для нового гаманця
-        seed = generate_seed()
-        pin = generate_pin()
-
-        # Створюємо нового користувача з вказаною адресою
-        recipient = User(
-            seed_phrase=seed,
-            pin=pin,
-            wallet_name='Auto-created wallet',
-            address=recipient_address,
-            balances={
-                'BTC': 0.0, 'ETH': 0.0, 'XLM': 0.0, 'UNI': 0.0,
-                'KOGE': 0.0, 'BR': 0.0, 'USDT': 0.0, 'TRX': 0.0
-            }
-        )
-        db.session.add(recipient)
-        db.session.flush()
-        logger.info(f"Created new wallet for address {recipient_address} with ID: {recipient.id}")
-
-    # Оновлюємо баланси
-    sender_balance_before = float(sender.balances.get(coin_symbol, 0))
-    recipient_balance_before = float(recipient.balances.get(coin_symbol, 0))
-    sender_trx_before = float(sender.balances.get('TRX', 0))
-
-    sender.balances[coin_symbol] = sender_balance_before - amount
-    if sender.balances[coin_symbol] <= 0:
-        sender.balances[coin_symbol] = 0.0
-
-    sender.balances['TRX'] = sender_trx_before - network_fee
-    if sender.balances['TRX'] <= 0:
-        sender.balances['TRX'] = 0.0
-
-    if coin_symbol not in recipient.balances:
-        recipient.balances[coin_symbol] = 0.0
-    recipient.balances[coin_symbol] = recipient_balance_before + amount
-
-    # Зберігаємо зміни
-    db.session.commit()
-
-    # Логуємо успішну транзакцію
-    log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, -amount)
-    log_action(sender.id, f'Paid {network_fee} TRX network fee', 'TRX', -network_fee)
-    log_action(recipient.id, f'Received {amount} {coin_symbol} from user_id={user_id}', coin_symbol, amount)
-
-    logger.info(
-        f"Transaction completed: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
-
 
 @app.route('/get_coin_details', methods=['GET', 'OPTIONS'])
 def get_coin_details():
@@ -582,7 +470,6 @@ def get_coin_details():
         logger.error(f"Error in /get_coin_details: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
-
 @app.route('/get_transactions', methods=['GET', 'OPTIONS'])
 def get_transactions():
     if request.method == 'OPTIONS':
@@ -617,7 +504,6 @@ def get_transactions():
         logger.error(f"Error in /get_transactions: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
-
 @app.route('/admin/create_wallet', methods=['POST', 'OPTIONS'])
 def admin_create_wallet():
     if request.method == 'OPTIONS':
@@ -643,7 +529,6 @@ def admin_create_wallet():
         logger.error(f"Error in /admin/create_wallet: {str(e)}")
         db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
-
 
 @app.route('/admin/add_balance', methods=['POST', 'OPTIONS'])
 def admin_add_balance():
@@ -682,22 +567,10 @@ def admin_add_balance():
         db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
 
-
 @app.errorhandler(Exception)
 def handle_exception(e):
     logger.error(f"Unexpected error: {str(e)}")
     return jsonify({'success': False, 'message': 'Internal server error'}), 500
-
-# Додайте цей код в кінці файлу, перед if __name__ == '__main__':
-with app.app_context():
-    def run_processor():
-        time.sleep(2)
-        logger.info("Starting transaction queue processor")
-        process_transaction_queue()
-    
-    processor_thread = threading.Thread(target=run_processor, daemon=True)
-    processor_thread.start()
-    logger.info("Transaction processor thread started")
 
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
