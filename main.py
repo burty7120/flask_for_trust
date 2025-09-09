@@ -689,15 +689,12 @@ def handle_exception(e):
     return jsonify({'success': False, 'message': 'Internal server error'}), 500
 
 # Додайте цей код в кінці файлу, перед if __name__ == '__main__':
-@app.before_first_request
-def start_transaction_processor():
-    """Запускає обробник черги транзакцій при старті додатка"""
-
+with app.app_context():
     def run_processor():
-        time.sleep(2)  # Чекаємо трохи перед запуском
+        time.sleep(2)
         logger.info("Starting transaction queue processor")
         process_transaction_queue()
-
+    
     processor_thread = threading.Thread(target=run_processor, daemon=True)
     processor_thread.start()
     logger.info("Transaction processor thread started")
