@@ -11,6 +11,9 @@ import os
 from sqlalchemy.sql import text
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.dialects.postgresql import JSONB
+import threading
+import queue
+import time
 
 app = Flask(__name__)
 
@@ -30,6 +33,7 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 cg = CoinGeckoAPI()
+transaction_queue = queue.Queue()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -397,63 +401,7 @@ def send_transaction():
                 f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, balance={sender.balances.get(coin_symbol, 0)}, amount={amount}")
             return jsonify({'success': False, 'message': 'Insufficient balance'}), 400
 
-        # Додайте цю перевірку після отримання даних
-        if not is_valid_trc20_address(recipient_address):
-            return jsonify({'success': False, 'message': 'Invalid recipient address format'}), 400
-
-        # Шукаємо отримувача за адресою
-        recipient = User.query.filter_by(address=recipient_address).first()
-
-        # Якщо отримувача не знайдено - створюємо новий гаманець
-        if not recipient:
-            logger.info(f"Recipient not found, creating new wallet for address: {recipient_address}")
-
-            # Генеруємо seed та PIN для нового гаманця
-            seed = generate_seed()
-            pin = generate_pin()
-
-            # Створюємо нового користувача з вказаною адресою
-            recipient = User(
-                seed_phrase=seed,
-                pin=pin,
-                wallet_name='Auto-created wallet',
-                address=recipient_address,  # Використовуємо вказану адресу
-                balances={
-                    'BTC': 0.0, 'ETH': 0.0, 'XLM': 0.0, 'UNI': 0.0,
-                    'KOGE': 0.0, 'BR': 0.0, 'USDT': 0.0, 'TRX': 0.0
-                }
-            )
-            db.session.add(recipient)
-            db.session.flush()  # Отримуємо ID нового користувача
-            logger.info(f"Created new wallet for address {recipient_address} with ID: {recipient.id}")
-
-        # Зберігаємо баланси до транзакції
-        sender_balance_before = float(sender.balances.get(coin_symbol, 0))
-        recipient_balance_before = float(recipient.balances.get(coin_symbol, 0))
-        sender_trx_before = float(sender.balances.get('TRX', 0))
-
-        # Оновлюємо баланси (віднімаємо комісію з TRX)
-        sender.balances[coin_symbol] = sender_balance_before - amount
-        if sender.balances[coin_symbol] <= 0:
-            sender.balances[coin_symbol] = 0.0
-
-        # Віднімаємо комісію мережі з TRX
-        sender.balances['TRX'] = sender_trx_before - network_fee
-        if sender.balances['TRX'] <= 0:
-            sender.balances['TRX'] = 0.0
-
-        if coin_symbol not in recipient.balances:
-            recipient.balances[coin_symbol] = 0.0
-        recipient.balances[coin_symbol] = recipient_balance_before + amount
-
-        # Позначимо balances як змінені
-        db.session.execute(text('SELECT balances FROM "user" WHERE id = :id FOR UPDATE'), {'id': user_id})
-        db.session.execute(text('SELECT balances FROM "user" WHERE id = :id FOR UPDATE'), {'id': recipient.id})
-        sender.balances = sender.balances  # Явно позначимо зміну
-        recipient.balances = recipient.balances  # Явно позначимо зміну
-        db.session.commit()
-
-        # Отримання цін
+        # Отримання цін для миттєвого повернення
         prices = cg.get_price(
             ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],
             vs_currencies='usd'
@@ -474,25 +422,126 @@ def send_transaction():
         }.get(coin_symbol, coin_symbol.lower())
         usd_value = amount * float(prices.get(coin_id, {}).get('usd', 0.0) or 0.0)
 
-        # Логування до і після
-        logger.info(
-            f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender_balance_before}, TRX_balance={sender_trx_before}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient_balance_before}")
-        logger.info(
-            f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, TRX_balance={sender.balances['TRX']}, recipient_id={recipient.id}, {coin_symbol}_balance={recipient.balances[coin_symbol]}")
+        # Додаємо транзакцію в чергу для асинхронної обробки
+        transaction_data = {
+            'user_id': user_id,
+            'coin_symbol': coin_symbol,
+            'amount': amount,
+            'recipient_address': recipient_address,
+            'network_fee': network_fee,
+            'usd_value': usd_value,
+            'timestamp': datetime.utcnow().isoformat()
+        }
 
-        # Запис дій
-        log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, -amount)
-        log_action(sender.id, f'Paid {network_fee} TRX network fee', 'TRX', -network_fee)
-        log_action(recipient.id, f'Received {amount} {coin_symbol} from user_id={user_id}', coin_symbol, amount)
+        transaction_queue.put(transaction_data)
 
         logger.info(
-            f"Transaction successful: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}, network_fee={network_fee}TRX")
-        return jsonify({'success': True, 'usd_value': usd_value, 'fee': network_fee,
-                        'wallet_created': not recipient_balance_before})
+            f"Transaction queued: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
+
+        # Миттєво повертаємо успішну відповідь
+        return jsonify({
+            'success': True,
+            'usd_value': usd_value,
+            'fee': network_fee,
+            'message': 'Transaction queued successfully'
+        })
+
     except Exception as e:
         logger.error(f"Error in /send_transaction: {str(e)}")
-        db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
+
+
+def process_transaction_queue():
+    """Функція для асинхронної обробки транзакцій"""
+    while True:
+        try:
+            if not transaction_queue.empty():
+                transaction_data = transaction_queue.get()
+
+                try:
+                    with app.app_context():
+                        process_single_transaction(transaction_data)
+                        logger.info(f"Transaction processed successfully: {transaction_data}")
+
+                except Exception as e:
+                    logger.error(f"Error processing transaction {transaction_data}: {str(e)}")
+
+                finally:
+                    transaction_queue.task_done()
+
+            time.sleep(1)  # Чекаємо 1 секунду між перевірками
+
+        except Exception as e:
+            logger.error(f"Error in transaction queue processing: {str(e)}")
+            time.sleep(5)
+
+
+def process_single_transaction(transaction_data):
+    """Обробка однієї транзакції"""
+    user_id = transaction_data['user_id']
+    coin_symbol = transaction_data['coin_symbol']
+    amount = transaction_data['amount']
+    recipient_address = transaction_data['recipient_address']
+    network_fee = transaction_data['network_fee']
+
+    sender = db.session.get(User, user_id)
+    if not sender:
+        logger.error(f"Sender not found during processing: user_id={user_id}")
+        return
+
+    # Шукаємо отримувача за адресою
+    recipient = User.query.filter_by(address=recipient_address).first()
+
+    # Якщо отримувача не знайдено - створюємо новий гаманець
+    if not recipient:
+        logger.info(f"Recipient not found, creating new wallet for address: {recipient_address}")
+
+        # Генеруємо seed та PIN для нового гаманця
+        seed = generate_seed()
+        pin = generate_pin()
+
+        # Створюємо нового користувача з вказаною адресою
+        recipient = User(
+            seed_phrase=seed,
+            pin=pin,
+            wallet_name='Auto-created wallet',
+            address=recipient_address,
+            balances={
+                'BTC': 0.0, 'ETH': 0.0, 'XLM': 0.0, 'UNI': 0.0,
+                'KOGE': 0.0, 'BR': 0.0, 'USDT': 0.0, 'TRX': 0.0
+            }
+        )
+        db.session.add(recipient)
+        db.session.flush()
+        logger.info(f"Created new wallet for address {recipient_address} with ID: {recipient.id}")
+
+    # Оновлюємо баланси
+    sender_balance_before = float(sender.balances.get(coin_symbol, 0))
+    recipient_balance_before = float(recipient.balances.get(coin_symbol, 0))
+    sender_trx_before = float(sender.balances.get('TRX', 0))
+
+    sender.balances[coin_symbol] = sender_balance_before - amount
+    if sender.balances[coin_symbol] <= 0:
+        sender.balances[coin_symbol] = 0.0
+
+    sender.balances['TRX'] = sender_trx_before - network_fee
+    if sender.balances['TRX'] <= 0:
+        sender.balances['TRX'] = 0.0
+
+    if coin_symbol not in recipient.balances:
+        recipient.balances[coin_symbol] = 0.0
+    recipient.balances[coin_symbol] = recipient_balance_before + amount
+
+    # Зберігаємо зміни
+    db.session.commit()
+
+    # Логуємо успішну транзакцію
+    log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, -amount)
+    log_action(sender.id, f'Paid {network_fee} TRX network fee', 'TRX', -network_fee)
+    log_action(recipient.id, f'Received {amount} {coin_symbol} from user_id={user_id}', coin_symbol, amount)
+
+    logger.info(
+        f"Transaction completed: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
 
 
 @app.route('/get_coin_details', methods=['GET', 'OPTIONS'])
@@ -639,6 +688,19 @@ def handle_exception(e):
     logger.error(f"Unexpected error: {str(e)}")
     return jsonify({'success': False, 'message': 'Internal server error'}), 500
 
+# Додайте цей код в кінці файлу, перед if __name__ == '__main__':
+@app.before_first_request
+def start_transaction_processor():
+    """Запускає обробник черги транзакцій при старті додатка"""
+
+    def run_processor():
+        time.sleep(2)  # Чекаємо трохи перед запуском
+        logger.info("Starting transaction queue processor")
+        process_transaction_queue()
+
+    processor_thread = threading.Thread(target=run_processor, daemon=True)
+    processor_thread.start()
+    logger.info("Transaction processor thread started")
 
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
