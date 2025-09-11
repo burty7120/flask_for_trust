@@ -326,7 +326,7 @@ def send_transaction():
         coin_symbol = data.get('coin_symbol')
         amount = data.get('amount')
         recipient_address = data.get('recipient_address')
-        network_fee = data.get('network_fee', 1.0)  # Комісія мережі, за замовчуванням 1.0 TRX
+        network_fee = data.get('network_fee', 0.0)  # Змінено на 0.0 за замовчуванням
 
         if not all([user_id, coin_symbol, amount, recipient_address]):
             logger.warning(f"Missing required fields: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
@@ -353,12 +353,8 @@ def send_transaction():
 
         coin_symbol = coin_symbol.upper()
         
-        # Перевіряємо чи є достатньо TRX для комісії
-        trx_balance = float(sender.balances.get('TRX', 0))
-        if trx_balance < network_fee:
-            logger.warning(f"Insufficient TRX for network fee: user_id={user_id}, TRX_balance={trx_balance}, network_fee={network_fee}")
-            return jsonify({'success': False, 'message': f'Insufficient TRX for network fee. Required: {network_fee}, available: {trx_balance}'}), 400
-
+        # Видалено перевірку на достатність TRX для комісії
+        
         # Перевіряємо чи є достатньо монет для відправки
         if coin_symbol not in sender.balances or float(sender.balances.get(coin_symbol, 0)) < amount:
             logger.warning(f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, balance={sender.balances.get(coin_symbol, 0)}, amount={amount}")
@@ -366,17 +362,13 @@ def send_transaction():
 
         # Зберігаємо баланси до транзакції
         sender_balance_before = float(sender.balances.get(coin_symbol, 0))
-        sender_trx_before = float(sender.balances.get('TRX', 0))
 
-        # Оновлюємо баланси (віднімаємо комісію з TRX)
+        # Оновлюємо баланси (тільки віднімаємо суму відправки, комісія = 0)
         sender.balances[coin_symbol] = sender_balance_before - amount
         if sender.balances[coin_symbol] <= 0:
             sender.balances[coin_symbol] = 0.0
         
-        # Віднімаємо комісію мережі з TRX
-        sender.balances['TRX'] = sender_trx_before - network_fee
-        if sender.balances['TRX'] <= 0:
-            sender.balances['TRX'] = 0.0
+        # Видалено віднімання комісії мережі з TRX
         
         # Позначимо balances як змінені
         db.session.execute(text('SELECT balances FROM "user" WHERE id = :id FOR UPDATE'), {'id': user_id})
@@ -405,12 +397,12 @@ def send_transaction():
         usd_value = amount * float(prices.get(coin_id, {}).get('usd', 0.0) or 0.0)
 
         # Логування до і після
-        logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender_balance_before}, TRX_balance={sender_trx_before}")
-        logger.info(f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, TRX_balance={sender.balances['TRX']}")
+        logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender_balance_before}")
+        logger.info(f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}")
 
         # Запис дій (відправка в нікуда)
         log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address} (external wallet)', coin_symbol, -amount)
-        log_action(sender.id, f'Paid {network_fee} TRX network fee', 'TRX', -network_fee)
+        # Видалено логування оплати комісії
 
         logger.info(f"Transaction successful (external): user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}, network_fee={network_fee}TRX")
         return jsonify({'success': True, 'usd_value': usd_value, 'fee': network_fee})
