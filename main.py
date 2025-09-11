@@ -132,43 +132,18 @@ def add_cors_headers(response):
     return response
 
 def get_cached_prices():
-    with price_cache['lock']:
-        # Дефолтні ціни на випадок помилок
-        default_prices = {
-            'bitcoin': {'usd': 104000.0, 'usd_24h_change': 0.0},
-            'ethereum': {'usd': 4200.0, 'usd_24h_change': 0.0},
-            'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
-            'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
-            'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
-            'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0},
-            'tether': {'usd': 1.0, 'usd_24h_change': 0.0},
-            'tron': {'usd': 0.15, 'usd_24h_change': 0.0}
-        }
-        
-        # Якщо кеш старіший 60 секунд - оновлюємо
-        if price_cache['last_update'] is None or (datetime.now() - price_cache['last_update']).total_seconds() > 60:
-            try:
-                logger.info("Fetching fresh prices from CoinGecko")
-                prices = cg.get_price(
-                    ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],
-                    vs_currencies='usd',
-                    include_24hr_change=True
-                )
-                if prices:
-                    price_cache['data'] = prices
-                    price_cache['last_update'] = datetime.now()
-                    logger.info("CoinGecko prices updated successfully")
-                else:
-                    logger.warning("CoinGecko returned empty response, using default prices")
-                    price_cache['data'] = default_prices
-            except Exception as e:
-                logger.error(f"Error fetching prices from CoinGecko: {str(e)}")
-                # Використовуємо дефолтні ціни при помилці
-                price_cache['data'] = default_prices
-                price_cache['last_update'] = datetime.now()
-        
-        # Завжди повертаємо дані, навіть якщо це дефолтні
-        return price_cache['data'] or default_prices
+    # ВИДАЛИТИ ВСІ ЗАПИТИ ДО COINGECKO - ВИКОРИСТОВУВАТИ СТАТИЧНІ ЦІНИ
+    static_prices = {
+        'bitcoin': {'usd': 60000.0, 'usd_24h_change': 0.0},
+        'ethereum': {'usd': 2500.0, 'usd_24h_change': 0.0},
+        'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
+        'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
+        'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
+        'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0},
+        'tether': {'usd': 1.0, 'usd_24h_change': 0.0},
+        'tron': {'usd': 0.15, 'usd_24h_change': 0.0}
+    }
+    return static_prices
 
 @app.route('/generate', methods=['POST', 'OPTIONS'])
 def generate_wallet():
