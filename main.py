@@ -5,12 +5,13 @@ from flask_migrate import Migrate
 from pycoingecko import CoinGeckoAPI
 import random
 import string
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import os
 from sqlalchemy.sql import text
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.dialects.postgresql import JSONB
+import threading
 
 app = Flask(__name__)
 
@@ -37,6 +38,12 @@ words = [
     'man', 'net', 'oak', 'pig', 'quilt', 'rat', 'sun', 'top', 'up', 'van', 'win', 'xray',
     'yak', 'zip', 'ant', 'bee', 'cow', 'duck', 'ear', 'fox', 'gun', 'hen', 'ink', 'jug'
 ]
+
+price_cache = {
+    'data': None,
+    'last_update': None,
+    'lock': threading.Lock()
+}
 
 class User(db.Model):
     __tablename__ = 'user'
@@ -124,6 +131,38 @@ def add_cors_headers(response):
     response.headers['Access-Control-Allow-Credentials'] = 'true'
     return response
 
+def get_cached_prices():
+    with price_cache['lock']:
+        # Якщо кеш старіший 60 секунд - оновлюємо
+        if price_cache['last_update'] is None or (datetime.now() - price_cache['last_update']).total_seconds() > 60:
+            try:
+                prices = cg.get_price(
+                    ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],
+                    vs_currencies='usd',
+                    include_24hr_change=True
+                )
+                if prices:
+                    price_cache['data'] = prices
+                    price_cache['last_update'] = datetime.now()
+                    logger.info("CoinGecko prices updated successfully")
+                else:
+                    logger.warning("CoinGecko returned empty response")
+            except Exception as e:
+                logger.error(f"Error fetching prices from CoinGecko: {str(e)}")
+                # Якщо помилка, використовуємо старі дані або дефолтні
+                if price_cache['data'] is None:
+                    price_cache['data'] = {
+                        'bitcoin': {'usd': 60000.0, 'usd_24h_change': 0.0},
+                        'ethereum': {'usd': 2500.0, 'usd_24h_change': 0.0},
+                        'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
+                        'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
+                        'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
+                        'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0},
+                        'tether': {'usd': 1.0, 'usd_24h_change': 0.0},
+                        'tron': {'usd': 0.15, 'usd_24h_change': 0.0}
+                    }
+        return price_cache['data']
+
 @app.route('/generate', methods=['POST', 'OPTIONS'])
 def generate_wallet():
     if request.method == 'OPTIONS':
@@ -203,33 +242,8 @@ def get_balances():
             logger.warning(f"User not found: user_id={user_id}")
             return jsonify({'success': False, 'message': 'User not found'}), 404
 
-        try:
-            prices = cg.get_price(
-                ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],  # Додано USDT і TRX
-                vs_currencies='usd',
-                include_24hr_change=True
-            ) or {
-                'bitcoin': {'usd': 60000.0, 'usd_24h_change': 0.0},
-                'ethereum': {'usd': 2500.0, 'usd_24h_change': 0.0},
-                'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
-                'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
-                'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
-                'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0},
-                'tether': {'usd': 1.0, 'usd_24h_change': 0.0},  # Додано USDT
-                'tron': {'usd': 0.15, 'usd_24h_change': 0.0}   # Додано TRX
-            }
-        except Exception as e:
-            logger.error(f"Error fetching prices from CoinGecko: {str(e)}")
-            prices = {
-                'bitcoin': {'usd': 60000.0, 'usd_24h_change': 0.0},
-                'ethereum': {'usd': 2500.0, 'usd_24h_change': 0.0},
-                'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
-                'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
-                'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
-                'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0},
-                'tether': {'usd': 1.0, 'usd_24h_change': 0.0},  # Додано USDT
-                'tron': {'usd': 0.15, 'usd_24h_change': 0.0}   # Додано TRX
-            }
+        # ВИКОРИСТОВУЄМО КЕШОВАНІ ЦІНИ
+        prices = get_cached_prices()
 
         token_images = {
             'BTC': 'images/btc.png',
@@ -238,15 +252,16 @@ def get_balances():
             'UNI': 'images/uni.png',
             'KOGE': 'images/koge.png',
             'BR': 'images/br.png',
-            'USDT': 'images/usdt.png',  # Додано USDT
-            'TRX': 'images/trx.png'    # Додано TRX
+            'USDT': 'images/usdt.png',
+            'TRX': 'images/trx.png'
         }
+        
         balances = [
             {
                 'name': {
                     'BTC': 'Bitcoin', 'ETH': 'Ethereum', 'XLM': 'Stellar',
                     'UNI': 'Uniswap', 'KOGE': 'Koge', 'BR': 'Billionaire',
-                    'USDT': 'Tether', 'TRX': 'TRON'  # Додано USDT і TRX
+                    'USDT': 'Tether', 'TRX': 'TRON'
                 }.get(symbol, symbol),
                 'symbol': symbol,
                 'balance': float(balance) if balance is not None and not isinstance(balance, str) else 0.0,
@@ -261,13 +276,14 @@ def get_balances():
                 'uniswap' if symbol == 'UNI' else
                 'koge' if symbol == 'KOGE' else
                 'billionaire' if symbol == 'BR' else
-                'tether' if symbol == 'USDT' else  # Додано USDT
-                'tron' if symbol == 'TRX' else symbol.lower()  # Додано TRX
+                'tether' if symbol == 'USDT' else
+                'tron' if symbol == 'TRX' else symbol.lower()
             ]
-            if float(balance) > 0  # Фільтруємо баланси > 0
+            if float(balance) > 0
         ]
+        
         log_action(user.id, 'Viewed balances')
-        logger.info(f"Balances retrieved: user_id={user_id}, balances={balances}")
+        logger.info(f"Balances retrieved: user_id={user_id}")
         return jsonify({
             'success': True,
             'balances': balances,
@@ -321,6 +337,7 @@ def send_transaction():
     if request.method == 'OPTIONS':
         return '', 204
     
+    start_time = datetime.now()
     try:
         data = request.get_json()
         user_id = data.get('user_id')
@@ -329,11 +346,9 @@ def send_transaction():
         recipient_address = data.get('recipient_address')
         network_fee = data.get('network_fee', 0.0)
 
-        # Швидка валідація
         if not all([user_id, coin_symbol, amount, recipient_address]):
             return jsonify({'success': False, 'message': 'Missing required fields'}), 400
 
-        # Конвертація
         try:
             user_id = int(user_id)
             amount = float(amount)
@@ -341,14 +356,12 @@ def send_transaction():
         except (ValueError, TypeError):
             return jsonify({'success': False, 'message': 'Invalid data format'}), 400
 
-        # Отримуємо користувача
         sender = db.session.get(User, user_id)
         if not sender:
             return jsonify({'success': False, 'message': 'Sender not found'}), 404
 
         coin_symbol = coin_symbol.upper()
         
-        # Швидка перевірка балансу
         if coin_symbol not in sender.balances or float(sender.balances.get(coin_symbol, 0)) < amount:
             return jsonify({'success': False, 'message': 'Insufficient balance'}), 400
 
@@ -357,7 +370,7 @@ def send_transaction():
             if trx_balance < network_fee:
                 return jsonify({'success': False, 'message': 'Insufficient TRX for network fee'}), 400
 
-        # Швидке оновлення балансів
+        # Оновлюємо баланси
         sender_balance_before = float(sender.balances.get(coin_symbol, 0))
         sender.balances[coin_symbol] = max(0, sender_balance_before - amount)
         
@@ -368,11 +381,21 @@ def send_transaction():
         # ШВИДКИЙ коміт (без блокування!)
         db.session.commit()
 
-        # Простий розрахунок USD значення (без CoinGecko)
-        price_cache = {'USDT': 1.0, 'TRX': 0.15, 'BTC': 60000.0, 'ETH': 2500.0, 'XLM': 0.1, 'UNI': 6.0, 'KOGE': 0.01, 'BR': 0.001}
-        usd_value = amount * price_cache.get(coin_symbol, 1.0)
+        # ВИКОРИСТОВУЄМО КЕШОВАНІ ЦІНИ
+        prices = get_cached_prices()
+        coin_id = {
+            'BTC': 'bitcoin', 'ETH': 'ethereum', 'XLM': 'stellar',
+            'UNI': 'uniswap', 'KOGE': 'koge', 'BR': 'billionaire',
+            'USDT': 'tether', 'TRX': 'tron'
+        }.get(coin_symbol, coin_symbol.lower())
+        
+        usd_value = amount * float(prices.get(coin_id, {}).get('usd', 1.0))
 
-        # Мінімальне логування
+        # Логування
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+        logger.info(f"Transaction completed in {processing_time:.2f}s: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}")
+
         log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, -amount)
         if network_fee > 0:
             log_action(sender.id, f'Paid {network_fee} TRX network fee', 'TRX', -network_fee)
