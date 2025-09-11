@@ -320,109 +320,86 @@ def get_wallets():
 def send_transaction():
     if request.method == 'OPTIONS':
         return '', 204
+    
+    start_time = datetime.now()
+    logger.info(f"Starting transaction processing at {start_time}")
+    
     try:
         data = request.get_json()
         user_id = data.get('user_id')
         coin_symbol = data.get('coin_symbol')
         amount = data.get('amount')
         recipient_address = data.get('recipient_address')
-        network_fee = data.get('network_fee', 0.0)  # Комісія мережі, за замовчуванням 0.0
+        network_fee = data.get('network_fee', 0.0)
 
+        logger.info(f"Transaction data received: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}")
+
+        # Швидка валідація
         if not all([user_id, coin_symbol, amount, recipient_address]):
-            logger.warning(f"Missing required fields: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}")
             return jsonify({'success': False, 'message': 'Missing required fields'}), 400
 
+        # Конвертація даних
         try:
             user_id = int(user_id)
             amount = float(amount)
             network_fee = float(network_fee)
-            if amount <= 0 or not isinstance(amount, (int, float)) or str(amount) == 'nan':
-                logger.warning(f"Invalid amount: {amount}")
-                return jsonify({'success': False, 'message': 'Invalid amount'}), 400
-            if network_fee < 0:
-                logger.warning(f"Invalid network fee: {network_fee}")
-                return jsonify({'success': False, 'message': 'Invalid network fee'}), 400
         except (ValueError, TypeError):
-            logger.warning(f"Invalid format: user_id={user_id}, amount={amount}, network_fee={network_fee}")
-            return jsonify({'success': False, 'message': 'Invalid user_id, amount or network fee format'}), 400
+            return jsonify({'success': False, 'message': 'Invalid data format'}), 400
 
+        # Отримуємо користувача
         sender = db.session.get(User, user_id)
         if not sender:
-            logger.warning(f"Sender not found: user_id={user_id}")
             return jsonify({'success': False, 'message': 'Sender not found'}), 404
 
         coin_symbol = coin_symbol.upper()
         
-        # Перевіряємо чи є достатньо TRX для комісії ТІЛЬКИ якщо комісія > 0
+        # ШВИДКА перевірка балансу
+        if coin_symbol not in sender.balances or float(sender.balances.get(coin_symbol, 0)) < amount:
+            return jsonify({'success': False, 'message': 'Insufficient balance'}), 400
+
         if network_fee > 0:
             trx_balance = float(sender.balances.get('TRX', 0))
             if trx_balance < network_fee:
-                logger.warning(f"Insufficient TRX for network fee: user_id={user_id}, TRX_balance={trx_balance}, network_fee={network_fee}")
-                return jsonify({'success': False, 'message': f'Insufficient TRX for network fee. Required: {network_fee}, available: {trx_balance}'}), 400
+                return jsonify({'success': False, 'message': f'Insufficient TRX for network fee'}), 400
 
-        # Перевіряємо чи є достатньо монет для відправки
-        if coin_symbol not in sender.balances or float(sender.balances.get(coin_symbol, 0)) < amount:
-            logger.warning(f"Insufficient balance: user_id={user_id}, coin_symbol={coin_symbol}, balance={sender.balances.get(coin_symbol, 0)}, amount={amount}")
-            return jsonify({'success': False, 'message': 'Insufficient balance'}), 400
-
-        # Зберігаємо баланси до транзакції
+        # ШВИДКЕ оновлення балансів
         sender_balance_before = float(sender.balances.get(coin_symbol, 0))
-        sender_trx_before = float(sender.balances.get('TRX', 0))
-
-        # Оновлюємо баланси (віднімаємо суму відправки)
-        sender.balances[coin_symbol] = sender_balance_before - amount
-        if sender.balances[coin_symbol] <= 0:
-            sender.balances[coin_symbol] = 0.0
+        sender.balances[coin_symbol] = max(0, sender_balance_before - amount)
         
-        # Віднімаємо комісію мережі з TRX ТІЛЬКИ якщо комісія > 0
         if network_fee > 0:
-            sender.balances['TRX'] = sender_trx_before - network_fee
-            if sender.balances['TRX'] <= 0:
-                sender.balances['TRX'] = 0.0
-        
-        # Позначимо balances як змінені
-        db.session.execute(text('SELECT balances FROM "user" WHERE id = :id FOR UPDATE'), {'id': user_id})
-        sender.balances = sender.balances  # Явно позначимо зміну
+            sender_trx_before = float(sender.balances.get('TRX', 0))
+            sender.balances['TRX'] = max(0, sender_trx_before - network_fee)
+
+        # ШВИДКИЙ коміт
         db.session.commit()
 
-        # Отримання цін
-        prices = cg.get_price(
-            ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],
-            vs_currencies='usd'
-        ) or {
-            'bitcoin': {'usd': 60000.0},
-            'ethereum': {'usd': 2500.0},
-            'stellar': {'usd': 0.1},
-            'uniswap': {'usd': 6.0},
-            'koge': {'usd': 0.01},
-            'billionaire': {'usd': 0.001},
-            'tether': {'usd': 1.0},
-            'tron': {'usd': 0.15}
-        }
-        coin_id = {
-            'BTC': 'bitcoin', 'ETH': 'ethereum', 'XLM': 'stellar',
-            'UNI': 'uniswap', 'KOGE': 'koge', 'BR': 'billionaire',
-            'USDT': 'tether', 'TRX': 'tron'
-        }.get(coin_symbol, coin_symbol.lower())
-        usd_value = amount * float(prices.get(coin_id, {}).get('usd', 0.0) or 0.0)
+        # Отримання цін (можна винести в окремий поток або зробити асинхронно)
+        try:
+            prices = cg.get_price(
+                ids=['tether', 'tron'],  # Тільки потрібні монети
+                vs_currencies='usd'
+            ) or {'tether': {'usd': 1.0}, 'tron': {'usd': 0.15}}
+        except:
+            prices = {'tether': {'usd': 1.0}, 'tron': {'usd': 0.15}}
 
-        # Логування до і після
-        logger.info(f"Before transaction: sender_id={user_id}, {coin_symbol}_balance={sender_balance_before}, TRX_balance={sender_trx_before}")
-        logger.info(f"After transaction: sender_id={user_id}, {coin_symbol}_balance={sender.balances[coin_symbol]}, TRX_balance={sender.balances['TRX']}")
+        coin_id = 'tether' if coin_symbol == 'USDT' else 'tron'
+        usd_value = amount * float(prices.get(coin_id, {}).get('usd', 1.0))
 
-        # Запис дій (відправка в нікуда)
-        log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address} (external wallet)', coin_symbol, -amount)
-        
-        # Логуємо комісію тільки якщо вона > 0
+        # Логування
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+        logger.info(f"Transaction completed in {processing_time:.2f}s: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}")
+
+        log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, -amount)
         if network_fee > 0:
             log_action(sender.id, f'Paid {network_fee} TRX network fee', 'TRX', -network_fee)
 
-        logger.info(f"Transaction successful (external): user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}, recipient_address={recipient_address}, network_fee={network_fee}TRX")
         return jsonify({'success': True, 'usd_value': usd_value, 'fee': network_fee})
+        
     except Exception as e:
-        logger.error(f"Error in /send_transaction: {str(e)}")
         db.session.rollback()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        logger.error(f"Error in /send_transaction: {str(e)}")
+        return jsonify({'success': False, 'message': 'Internal server error'}), 500
 
 @app.route('/get_coin_details', methods=['GET', 'OPTIONS'])
 def get_coin_details():
