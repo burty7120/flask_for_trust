@@ -321,9 +321,6 @@ def send_transaction():
     if request.method == 'OPTIONS':
         return '', 204
     
-    start_time = datetime.now()
-    logger.info(f"Starting transaction processing at {start_time}")
-    
     try:
         data = request.get_json()
         user_id = data.get('user_id')
@@ -332,13 +329,11 @@ def send_transaction():
         recipient_address = data.get('recipient_address')
         network_fee = data.get('network_fee', 0.0)
 
-        logger.info(f"Transaction data received: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}")
-
         # Швидка валідація
         if not all([user_id, coin_symbol, amount, recipient_address]):
             return jsonify({'success': False, 'message': 'Missing required fields'}), 400
 
-        # Конвертація даних
+        # Конвертація
         try:
             user_id = int(user_id)
             amount = float(amount)
@@ -353,16 +348,16 @@ def send_transaction():
 
         coin_symbol = coin_symbol.upper()
         
-        # ШВИДКА перевірка балансу
+        # Швидка перевірка балансу
         if coin_symbol not in sender.balances or float(sender.balances.get(coin_symbol, 0)) < amount:
             return jsonify({'success': False, 'message': 'Insufficient balance'}), 400
 
         if network_fee > 0:
             trx_balance = float(sender.balances.get('TRX', 0))
             if trx_balance < network_fee:
-                return jsonify({'success': False, 'message': f'Insufficient TRX for network fee'}), 400
+                return jsonify({'success': False, 'message': 'Insufficient TRX for network fee'}), 400
 
-        # ШВИДКЕ оновлення балансів
+        # Швидке оновлення балансів
         sender_balance_before = float(sender.balances.get(coin_symbol, 0))
         sender.balances[coin_symbol] = max(0, sender_balance_before - amount)
         
@@ -370,26 +365,14 @@ def send_transaction():
             sender_trx_before = float(sender.balances.get('TRX', 0))
             sender.balances['TRX'] = max(0, sender_trx_before - network_fee)
 
-        # ШВИДКИЙ коміт
+        # ШВИДКИЙ коміт (без блокування!)
         db.session.commit()
 
-        # Отримання цін (можна винести в окремий поток або зробити асинхронно)
-        try:
-            prices = cg.get_price(
-                ids=['tether', 'tron'],  # Тільки потрібні монети
-                vs_currencies='usd'
-            ) or {'tether': {'usd': 1.0}, 'tron': {'usd': 0.15}}
-        except:
-            prices = {'tether': {'usd': 1.0}, 'tron': {'usd': 0.15}}
+        # Простий розрахунок USD значення (без CoinGecko)
+        price_cache = {'USDT': 1.0, 'TRX': 0.15, 'BTC': 60000.0, 'ETH': 2500.0, 'XLM': 0.1, 'UNI': 6.0, 'KOGE': 0.01, 'BR': 0.001}
+        usd_value = amount * price_cache.get(coin_symbol, 1.0)
 
-        coin_id = 'tether' if coin_symbol == 'USDT' else 'tron'
-        usd_value = amount * float(prices.get(coin_id, {}).get('usd', 1.0))
-
-        # Логування
-        end_time = datetime.now()
-        processing_time = (end_time - start_time).total_seconds()
-        logger.info(f"Transaction completed in {processing_time:.2f}s: user_id={user_id}, coin_symbol={coin_symbol}, amount={amount}")
-
+        # Мінімальне логування
         log_action(sender.id, f'Sent {amount} {coin_symbol} to {recipient_address}', coin_symbol, -amount)
         if network_fee > 0:
             log_action(sender.id, f'Paid {network_fee} TRX network fee', 'TRX', -network_fee)
