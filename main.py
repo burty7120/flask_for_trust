@@ -133,50 +133,47 @@ def add_cors_headers(response):
 
 def get_cached_prices():
     with price_cache['lock']:
-        # Дефолтні ціни
-        default_prices = {
-            'bitcoin': {'usd': 60000.0, 'usd_24h_change': 0.0},
-            'ethereum': {'usd': 2500.0, 'usd_24h_change': 0.0},
-            'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
-            'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
-            'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
-            'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0},
-            'tether': {'usd': 1.0, 'usd_24h_change': 0.0},
-            'tron': {'usd': 0.15, 'usd_24h_change': 0.0}
-        }
+        now = datetime.now()
         
-        # Якщо кеш старіший 60 секунд - оновлюємо
-        if price_cache['last_update'] is None or (datetime.now() - price_cache['last_update']).total_seconds() > 60:
-            try:
-                # ДОДАЄМО ТАЙМАУТ ДЛЯ COINGECKO (5 секунд)
-                import requests
-                from requests.exceptions import Timeout
-                
-                try:
-                    prices = cg.get_price(
-                        ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],
-                        vs_currencies='usd',
-                        include_24hr_change=True,
-                        request_timeout=5  # Таймаут 5 секунд
-                    )
-                    
-                    if prices:
-                        price_cache['data'] = prices
-                        price_cache['last_update'] = datetime.now()
-                        logger.info("CoinGecko prices updated successfully")
-                    else:
-                        logger.warning("CoinGecko returned empty response, using cached data")
-                        # Використовуємо старі дані або дефолтні
-                        price_cache['data'] = price_cache['data'] or default_prices
-                        
-                except Timeout:
-                    logger.warning("CoinGecko timeout, using cached data")
-                    price_cache['data'] = price_cache['data'] or default_prices
-                    
-            except Exception as e:
-                logger.error(f"Error fetching prices from CoinGecko: {str(e)}")
-                # Використовуємо кешовані або дефолтні дані
-                price_cache['data'] = price_cache['data'] or default_prices
+        # Якщо кеш актуальний (менше 60 секунд), повертаємо його
+        if (price_cache['last_update'] and 
+            (now - price_cache['last_update']).total_seconds() <= 60 and
+            price_cache['data']):
+            return price_cache['data']
+        
+        # Дефолтні ціни (тільки якщо кеш порожній)
+        if not price_cache['data']:
+            price_cache['data'] = {
+                'bitcoin': {'usd': 60000.0, 'usd_24h_change': 0.0},
+                'ethereum': {'usd': 2500.0, 'usd_24h_change': 0.0},
+                'stellar': {'usd': 0.1, 'usd_24h_change': 0.0},
+                'uniswap': {'usd': 6.0, 'usd_24h_change': 0.0},
+                'koge': {'usd': 0.01, 'usd_24h_change': 0.0},
+                'billionaire': {'usd': 0.001, 'usd_24h_change': 0.0},
+                'tether': {'usd': 1.0, 'usd_24h_change': 0.0},
+                'tron': {'usd': 0.15, 'usd_24h_change': 0.0}
+            }
+        
+        try:
+            # Спрощений запит до CoinGecko
+            prices = cg.get_price(
+                ids=['bitcoin', 'ethereum', 'stellar', 'uniswap', 'koge', 'billionaire', 'tether', 'tron'],
+                vs_currencies='usd',
+                include_24hr_change=True,
+                request_timeout=3  # Зменшений таймаут до 3 секунд
+            )
+            
+            if prices:
+                price_cache['data'] = prices
+                price_cache['last_update'] = now
+                logger.info("CoinGecko prices updated")
+            # Якщо prices пустий, використовуємо існуючий кеш
+            
+        except (Timeout, requests.exceptions.Timeout):
+            logger.warning("CoinGecko timeout, using cached data")
+        except Exception as e:
+            logger.error(f"Error fetching prices: {str(e)}")
+            # Використовуємо існуючий кеш
         
         return price_cache['data']
 
@@ -248,67 +245,56 @@ def login():
 def get_balances():
     if request.method == 'OPTIONS':
         return '', 204
-    try:
-        user_id = request.args.get('user_id')
-        if not user_id or user_id == 'null':
-            logger.warning(f"Invalid user_id: {user_id}")
-            return jsonify({'success': False, 'message': 'Invalid user ID'}), 400
+    
+    user_id = request.args.get('user_id')
+    if not user_id or user_id == 'null':
+        return jsonify({'success': False, 'message': 'Invalid user ID'}), 400
 
+    try:
         user = db.session.get(User, user_id)
         if not user:
-            logger.warning(f"User not found: user_id={user_id}")
             return jsonify({'success': False, 'message': 'User not found'}), 404
 
-        # ВИКОРИСТОВУЄМО КЕШОВАНІ ЦІНИ
+        # Швидше отримання цін
         prices = get_cached_prices()
 
-        token_images = {
-            'BTC': 'images/btc.png',
-            'ETH': 'images/eth.png',
-            'XLM': 'images/xlm.png',
-            'UNI': 'images/uni.png',
-            'KOGE': 'images/koge.png',
-            'BR': 'images/br.png',
-            'USDT': 'images/usdt.png',
-            'TRX': 'images/trx.png'
+        # Оптимізоване створення балансів
+        token_mapping = {
+            'BTC': {'name': 'Bitcoin', 'id': 'bitcoin', 'image': 'images/btc.png'},
+            'ETH': {'name': 'Ethereum', 'id': 'ethereum', 'image': 'images/eth.png'},
+            'XLM': {'name': 'Stellar', 'id': 'stellar', 'image': 'images/xlm.png'},
+            'UNI': {'name': 'Uniswap', 'id': 'uniswap', 'image': 'images/uni.png'},
+            'KOGE': {'name': 'Koge', 'id': 'koge', 'image': 'images/koge.png'},
+            'BR': {'name': 'Billionaire', 'id': 'billionaire', 'image': 'images/br.png'},
+            'USDT': {'name': 'Tether', 'id': 'tether', 'image': 'images/usdt.png'},
+            'TRX': {'name': 'TRON', 'id': 'tron', 'image': 'images/trx.png'}
         }
-        
-        balances = [
-            {
-                'name': {
-                    'BTC': 'Bitcoin', 'ETH': 'Ethereum', 'XLM': 'Stellar',
-                    'UNI': 'Uniswap', 'KOGE': 'Koge', 'BR': 'Billionaire',
-                    'USDT': 'Tether', 'TRX': 'TRON'
-                }.get(symbol, symbol),
-                'symbol': symbol,
-                'balance': float(balance) if balance is not None and not isinstance(balance, str) else 0.0,
-                'image': token_images.get(symbol, 'images/default-coin.png'),
-                'price': float(prices.get(id, {}).get('usd', 0.0)) if prices.get(id) else 0.0
-            }
-            for symbol, balance in user.balances.items()
-            for id in [
-                'bitcoin' if symbol == 'BTC' else
-                'ethereum' if symbol == 'ETH' else
-                'stellar' if symbol == 'XLM' else
-                'uniswap' if symbol == 'UNI' else
-                'koge' if symbol == 'KOGE' else
-                'billionaire' if symbol == 'BR' else
-                'tether' if symbol == 'USDT' else
-                'tron' if symbol == 'TRX' else symbol.lower()
-            ]
-            if float(balance) > 0
-        ]
-        
-        log_action(user.id, 'Viewed balances')
-        logger.info(f"Balances retrieved: user_id={user_id}")
+
+        balances = []
+        for symbol, balance in user.balances.items():
+            balance_float = float(balance) if balance is not None and not isinstance(balance, str) else 0.0
+            if balance_float > 0 and symbol in token_mapping:
+                token_info = token_mapping[symbol]
+                coin_data = prices.get(token_info['id'], {})
+                price = float(coin_data.get('usd', 0.0))
+                
+                balances.append({
+                    'name': token_info['name'],
+                    'symbol': symbol,
+                    'balance': balance_float,
+                    'image': token_info['image'],
+                    'price': price
+                })
+
         return jsonify({
             'success': True,
             'balances': balances,
             'prices': prices
         })
+        
     except Exception as e:
         logger.error(f"Error in /get_balances: {str(e)}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Internal server error'}), 500
 
 @app.route('/get_wallets', methods=['GET', 'OPTIONS'])
 def get_wallets():
